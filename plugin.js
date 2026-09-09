@@ -1,5 +1,5 @@
 /**
- * Prompt Enhancer — WorkBuddy-style "enhance prompt" for the Hermes composer.
+ * Prompt Enhancer — composer "enhance prompt" button for Hermes desktop.
  *
  * M1 core loop + layout fix.
  *   - read:  simplified composerPlainText replica (rich-editor.ts semantics)
