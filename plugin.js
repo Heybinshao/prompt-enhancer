@@ -208,7 +208,10 @@ async function runEnhance(btnEl) {
   const editor = resolveEditor(btnEl)
   if (!editor) return tNotify('error', 'notify.noEditor')
   if (!editor.isContentEditable) return tNotify('error', 'notify.notEditable')
-  if (editor.querySelector('[data-ref-text]')) return tNotify('error', 'notify.chipBail')
+  // Ref chips (@file:... etc) serialize to their literal command text and the
+  // official renderer rebuilds them on write-back (REF_RE chipSpans) — so a
+  // mixed draft is enhanceable: we protect the chip tokens in the template.
+  const hasChips = editor.querySelector('[data-ref-text]') !== null
   const text = serializeEditor(editor)
   if (!text.trim()) {
     // Images/attachments alone (no text) land here — tell the user instead of
@@ -217,19 +220,25 @@ async function runEnhance(btnEl) {
     return
   }
   if (text.length > MAX_INPUT_CHARS) return tNotify('error', 'notify.tooLong', text.length, MAX_INPUT_CHARS)
+  // No live session (fresh chat, nothing sent yet) is FINE: llm.oneshot
+  // natively falls back to the task backend when session_id is absent
+  // (methods_session.py docstring). Just omit the field.
   const sessionId = resolveSessionId(btnEl, () => host.state.activeSessionId.get())
-  if (!sessionId) return tNotify('error', 'notify.noSession')
 
   const snapshot = text
   $phase.set('enhancing')
   try {
-    const res = await host.request('llm.oneshot', {
-      instructions: SYSTEM_TEMPLATE,
+    const instructions = hasChips
+      ? SYSTEM_TEMPLATE + '\n\n额外硬性约束：文本中的 @file:、@folder:、@url:、@image: 等引用标记是文件/资源引用 token，必须原样保留在增强结果中（位置可以合理调整），禁止改写、翻译或删除它们。'
+      : SYSTEM_TEMPLATE
+    const req = {
+      instructions,
       input: text,
-      session_id: sessionId,
       max_tokens: 2048,
       temperature: 0.3
-    })
+    }
+    if (sessionId) req.session_id = sessionId
+    const res = await host.request('llm.oneshot', req)
     const cleaned = stripWrappingQuotes(String(res?.text ?? ''))
     if (!cleaned.trim()) throw new Error('empty')
     if (serializeEditor(editor) !== snapshot) {
