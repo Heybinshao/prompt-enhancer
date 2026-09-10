@@ -1,4 +1,4 @@
-# Prompt Enhancer for Hermes ![版本](https://img.shields.io/badge/版本-v1.0.1-blue)
+# Prompt Enhancer for Hermes ![版本](https://img.shields.io/badge/版本-v1.0.2-blue)
 
 【Hermes 桌面端插件】输入框「增强提示词」按钮——一句话草稿改写为结构化完整提示词。en / 简中 / 繁體。
 
@@ -55,7 +55,7 @@ Settings → Plugins → Prompt Enhancer → 关闭开关；或直接删除 `~/.
 
 - 文件/引用 chip 与文本混合的草稿：引用标记原样保留，只增强文本部分
 - 草稿超过 8000 字符暂不支持
-- 增强耗时取决于模型（通常 2-6 秒），转圈即进行中
+- 增强耗时取决于模型（通常数秒到 2 分钟），转圈即进行中；请求超时上限 3 分钟
 - ⌘Z 撤销的是你的打字历史，撤销不了增强替换——恢复原文请用按钮
 - 需要网关在线（增强走 `llm.oneshot` 网关通道）
 
