@@ -235,7 +235,11 @@ async function runEnhance(btnEl) {
       instructions,
       input: text,
       max_tokens: 2048,
-      temperature: 0.3
+      temperature: 0.3,
+      // NOT the default title_generation: that routes to the weak fast model
+      // and times out on our ~700-char template + long drafts (60s cap).
+      // A custom task name gets the standard aux model + its own timeout key.
+      task: 'prompt_enhancement'
     }
     if (sessionId) req.session_id = sessionId
     // host.request is hard-capped at the gateway default 30s
