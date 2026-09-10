@@ -238,7 +238,12 @@ async function runEnhance(btnEl) {
       temperature: 0.3
     }
     if (sessionId) req.session_id = sessionId
-    const res = await host.request('llm.oneshot', req)
+    // host.request is hard-capped at the gateway default 30s
+    // (DEFAULT_GATEWAY_REQUEST_TIMEOUT_MS) — LLM generation routinely exceeds
+    // it. getGateway().request takes timeoutMs as its 3rd arg: 3 minutes.
+    const gw = host.getGateway()
+    if (!gw) throw new Error('Hermes gateway unavailable')
+    const res = await gw.request('llm.oneshot', req, 180_000)
     const cleaned = stripWrappingQuotes(String(res?.text ?? ''))
     if (!cleaned.trim()) throw new Error('empty')
     if (serializeEditor(editor) !== snapshot) {
