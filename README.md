@@ -1,4 +1,4 @@
-# Prompt Enhancer for Hermes ![版本](https://img.shields.io/badge/版本-v1.0.2-blue)
+# Prompt Enhancer for Hermes ![版本](https://img.shields.io/badge/版本-v1.0.3-blue)
 
 【Hermes 桌面端插件】输入框「增强提示词」按钮——一句话草稿改写为结构化完整提示词。en / 简中 / 繁體。
 
