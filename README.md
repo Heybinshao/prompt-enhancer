@@ -1,4 +1,4 @@
-# Prompt Enhancer for Hermes ![版本](https://img.shields.io/badge/版本-v1.0.4-blue)
+# Prompt Enhancer for Hermes ![版本](https://img.shields.io/badge/版本-v1.0.5-blue)
 
 【Hermes 桌面端插件】输入框「增强提示词」按钮——一句话草稿改写为结构化完整提示词。en / 简中 / 繁體。
 
@@ -56,6 +56,7 @@ Settings → Plugins → Prompt Enhancer → 关闭开关；或直接删除 `~/.
 - 文件/引用 chip 与文本混合的草稿：引用标记原样保留，只增强文本部分
 - 草稿超过 8000 字符暂不支持
 - 增强耗时取决于模型（通常数秒到 2 分钟），转圈即进行中；请求超时上限 3 分钟
+- **服务端 429 限流自动重试**：网关上游渠道偶发限流（`增强失败：… 429`）时插件自动退避重试（3s / 5s 各一次）；若重试后仍失败，稍等几秒再点一次即可——限流是网关侧的瞬时状态，与插件和账号无关
 - **固定增强用模型（Hermes 配置，非插件功能）**：默认继承当前会话模型（新会话走辅助模型）。想固定用某个模型，在 Hermes 的 `config.yaml` 加：
 
   ```yaml

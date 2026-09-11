@@ -183,6 +183,16 @@ function writeBack(editor, text) {
   editor.dispatchEvent(new InputEvent('input', { bubbles: true }))
 }
 
+const RETRY_DELAYS_MS = [3000, 5000]
+
+// Gateway 429 (upstream channel rate limit, e.g. shared aggregator RPM) is
+// transient — the agent's own chat loop survives it via backoff retries, so a
+// one-shot no-retry call failing on the first click looked like a broken
+// plugin. Mirror the same defense here: retry 429 with backoff (3s, 5s).
+function isRateLimited(err) {
+  return /429|rate.?limit/i.test(`${err?.message ?? ''} ${err?.name ?? ''} ${String(err)}`)
+}
+
 // Layout fix: zero the official cluster's ml-auto so the parent's justify-end
 // packs [us, cluster] right in both inline and stacked modes.
 function applyLayoutFix(btnEl) {
@@ -247,7 +257,19 @@ async function runEnhance(btnEl) {
     // it. getGateway().request takes timeoutMs as its 3rd arg: 3 minutes.
     const gw = host.getGateway()
     if (!gw) throw new Error('Hermes gateway unavailable')
-    const res = await gw.request('llm.oneshot', req, 180_000)
+    let res = null
+    for (let attempt = 0; ; attempt++) {
+      try {
+        res = await gw.request('llm.oneshot', req, 180_000)
+        break
+      } catch (e) {
+        if (attempt < RETRY_DELAYS_MS.length && isRateLimited(e)) {
+          await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]))
+          continue
+        }
+        throw e
+      }
+    }
     const cleaned = stripWrappingQuotes(String(res?.text ?? ''))
     if (!cleaned.trim()) throw new Error('empty')
     if (serializeEditor(editor) !== snapshot) {
