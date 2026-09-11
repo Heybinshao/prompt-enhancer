@@ -15,9 +15,9 @@
  * own `justify-end` pack both right in every mode. Purely cosmetic inline
  * style; MutationObserver re-asserts after React remounts; disposed cleanly.
  */
-import { COMPOSER_AREAS, Button, Codicon, Tip, PALETTE_AREA, atom, host, usePluginI18n, useValue } from '@hermes/plugin-sdk'
+import { COMPOSER_AREAS, Button, Codicon, Tip, PALETTE_AREA, host, usePluginI18n } from '@hermes/plugin-sdk'
 import { jsx } from 'react/jsx-runtime'
-import { useLayoutEffect, useRef } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 
 const ID = 'prompt-enhancer'
 const MAX_INPUT_CHARS = 8000
@@ -89,13 +89,21 @@ function resolveSessionId(btnEl, getActiveSessionId) {
 }
 // ── pure:TDD-END ──
 
-const $phase = atom('idle') // idle | enhancing | enhanced
-let enhanceBackup = ''
-let lastApplied = ''
-// Cancel support (WorkBuddy parity): the gateway RPC has no abort channel, so
-// cancelling means "stop waiting" — a monotonically increasing token invalidates
-// any in-flight request; its late result is silently discarded.
-let enhanceSeq = 0
+// Per-composer state isolation: each composer instance (editor DOM node) owns
+// its own phase / backup / applied-text / cancel token. A global atom here made
+// EVERY window's button spin when one session was enhancing (v1.0.6 bug) —
+// state must be keyed by the editor node, React state drives this instance's
+// render only. Keyed by the editor element: it is the stable anchor per
+// composer (survives button remounts; WeakMap GCs when the composer unmounts).
+const stateByEditor = new WeakMap() // editor → { phase, backup, lastApplied, seq }
+function editorState(editor) {
+  let s = stateByEditor.get(editor)
+  if (!s) {
+    s = { phase: 'idle', backup: '', lastApplied: '', seq: 0 }
+    stateByEditor.set(editor, s)
+  }
+  return s
+}
 
 // ── i18n via official channel (v3 §3-⑩) ──
 // ctx.i18n.register(LOCALES): nested tree, dot-path keys, interpolator fns.
@@ -217,11 +225,12 @@ function releaseLayoutFix(btnEl) {
   }
 }
 
-async function runEnhance(btnEl) {
-  if ($phase.get() === 'enhancing') return
+async function runEnhance(btnEl, onPhase) {
   const editor = resolveEditor(btnEl)
   if (!editor) return tNotify('error', 'notify.noEditor')
   if (!editor.isContentEditable) return tNotify('error', 'notify.notEditable')
+  const st = editorState(editor)
+  if (st.phase === 'enhancing') return
   // Ref chips (@file:... etc) serialize to their literal command text and the
   // official renderer rebuilds them on write-back (REF_RE chipSpans) — so a
   // mixed draft is enhanceable: we protect the chip tokens in the template.
@@ -240,8 +249,9 @@ async function runEnhance(btnEl) {
   const sessionId = resolveSessionId(btnEl, () => host.state.activeSessionId.get())
 
   const snapshot = text
-  const seq = ++enhanceSeq
-  $phase.set('enhancing')
+  const seq = ++st.seq
+  st.phase = 'enhancing'
+  onPhase('enhancing')
   try {
     const instructions = hasChips
       ? SYSTEM_TEMPLATE + '\n\n额外硬性约束：文本中的 @file:、@folder:、@url:、@image: 等引用标记是文件/资源引用 token，必须原样保留在增强结果中（位置可以合理调整），禁止改写、翻译或删除它们。'
@@ -277,42 +287,49 @@ async function runEnhance(btnEl) {
     }
     // Cancelled while waiting → discard the late result silently (the editor
     // still holds the original snapshot; nothing to roll back).
-    if (seq !== enhanceSeq) return
+    if (seq !== st.seq) return
     const cleaned = stripWrappingQuotes(String(res?.text ?? ''))
     if (!cleaned.trim()) throw new Error('empty')
     if (serializeEditor(editor) !== snapshot) {
       tNotify('info', 'notify.draftChanged')
-      $phase.set('idle')
+      st.phase = 'idle'
+      onPhase('idle')
       return
     }
-    enhanceBackup = snapshot
-    lastApplied = cleaned
+    st.backup = snapshot
+    st.lastApplied = cleaned
     writeBack(editor, cleaned)
-    $phase.set('enhanced')
+    st.phase = 'enhanced'
+    onPhase('enhanced')
     if (looksTruncated(cleaned)) {
       tNotify('info', 'notify.truncated')
     }
   } catch (err) {
-    if (seq !== enhanceSeq) return // cancelled during retry backoff — stay quiet
+    if (seq !== st.seq) return // cancelled during retry backoff — stay quiet
     console.error('[prompt-enhancer] enhance failed:', err)
     tNotify('error', 'notify.failed', err?.message ?? String(err))
-    $phase.set('idle')
+    st.phase = 'idle'
+    onPhase('idle')
   }
 }
 
-function revert(btnEl) {
+function revert(btnEl, onPhase) {
   const editor = resolveEditor(btnEl)
   if (!editor) {
-    $phase.set('idle')
+    const st = editorState(editor ?? btnEl?.closest?.('[data-slot="composer-root"]')?.querySelector(`[data-slot="${RICH_INPUT_SLOT}"]`))
+    if (st) { st.phase = 'idle'; onPhase('idle') }
     return
   }
-  if (serializeEditor(editor) !== lastApplied) {
+  const st = editorState(editor)
+  if (serializeEditor(editor) !== st.lastApplied) {
     tNotify('info', 'notify.revertStale')
-    $phase.set('idle')
+    st.phase = 'idle'
+    onPhase('idle')
     return
   }
-  writeBack(editor, enhanceBackup)
-  $phase.set('idle')
+  writeBack(editor, st.backup)
+  st.phase = 'idle'
+  onPhase('idle')
 }
 
 // WorkBuddy-parity spinner: 16px circle, stroke-dasharray "28 10", 1s linear
@@ -349,9 +366,19 @@ function removeSpinnerStyle() {
 }
 
 function EnhanceButton() {
-  const phase = useValue($phase)
   const t = usePluginI18n(ID)
   const btnRef = useRef(null)
+  // Phase is per-composer: React state drives THIS instance's render only;
+  // the authoritative copy lives in stateByEditor (keyed by editor node) so
+  // runEnhance/revert/MutationObserver can read/update it outside React.
+  const [phase, setPhase] = useState('idle')
+  const phaseRef = useRef(phase)
+  phaseRef.current = phase
+  const syncPhase = useCallback((p) => {
+    const editor = resolveEditor(btnRef.current)
+    if (editor) editorState(editor).phase = p
+    setPhase(p)
+  }, [])
 
   // Auto-reset: once enhanced, the enhanced state only stays valid while the
   // editor still HOLDS the enhanced text. Sending clears the editor
@@ -362,12 +389,14 @@ function EnhanceButton() {
     const btn = btnRef.current
     const editor = resolveEditor(btn)
     if (!editor) return
+    const st = editorState(editor)
     const mo = new MutationObserver(() => {
-      if ($phase.get() !== 'enhanced') return
-      if (serializeEditor(editor) !== lastApplied) {
-        $phase.set('idle')
-        enhanceBackup = ''
-        lastApplied = ''
+      if (st.phase !== 'enhanced') return
+      if (serializeEditor(editor) !== st.lastApplied) {
+        st.phase = 'idle'
+        st.backup = ''
+        st.lastApplied = ''
+        setPhase('idle')
       }
     })
     mo.observe(editor, { childList: true, characterData: true, subtree: true })
@@ -390,13 +419,16 @@ function EnhanceButton() {
   }, [])
 
   const onClick = () => {
-    if (phase === 'enhanced') revert(btnRef.current)
-    else if (phase === 'enhancing') {
-      // WorkBuddy parity: the spinning button is a cancel button. Bump the seq
-      // so the in-flight request's late result is discarded, drop back to idle.
-      enhanceSeq++
-      $phase.set('idle')
-    } else runEnhance(btnRef.current)
+    const editor = resolveEditor(btnRef.current)
+    const st = editor ? editorState(editor) : null
+    const current = st?.phase ?? phaseRef.current
+    if (current === 'enhanced') revert(btnRef.current, syncPhase)
+    else if (current === 'enhancing') {
+      // WorkBuddy parity: the spinning button is a cancel button. Bump THIS
+      // editor's seq so its in-flight request's late result is discarded.
+      if (st) st.seq++
+      syncPhase('idle')
+    } else runEnhance(btnRef.current, syncPhase)
   }
 
   const tip = phase === 'enhancing' ? t('tip.enhancing') : phase === 'enhanced' ? t('tip.revert') : t('tip.idle')
@@ -482,9 +514,6 @@ export default {
     ctx.onDispose?.(() => {
       disposeI18n?.()
       removeSpinnerStyle()
-      $phase.set('idle')
-      enhanceBackup = ''
-      lastApplied = ''
       ti18nStatic = null
       document.querySelectorAll(`[${BTN_ATTR}]`).forEach(releaseLayoutFix)
     })
