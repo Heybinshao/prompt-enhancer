@@ -92,6 +92,10 @@ function resolveSessionId(btnEl, getActiveSessionId) {
 const $phase = atom('idle') // idle | enhancing | enhanced
 let enhanceBackup = ''
 let lastApplied = ''
+// Cancel support (WorkBuddy parity): the gateway RPC has no abort channel, so
+// cancelling means "stop waiting" — a monotonically increasing token invalidates
+// any in-flight request; its late result is silently discarded.
+let enhanceSeq = 0
 
 // ── i18n via official channel (v3 §3-⑩) ──
 // ctx.i18n.register(LOCALES): nested tree, dot-path keys, interpolator fns.
@@ -236,6 +240,7 @@ async function runEnhance(btnEl) {
   const sessionId = resolveSessionId(btnEl, () => host.state.activeSessionId.get())
 
   const snapshot = text
+  const seq = ++enhanceSeq
   $phase.set('enhancing')
   try {
     const instructions = hasChips
@@ -270,6 +275,9 @@ async function runEnhance(btnEl) {
         throw e
       }
     }
+    // Cancelled while waiting → discard the late result silently (the editor
+    // still holds the original snapshot; nothing to roll back).
+    if (seq !== enhanceSeq) return
     const cleaned = stripWrappingQuotes(String(res?.text ?? ''))
     if (!cleaned.trim()) throw new Error('empty')
     if (serializeEditor(editor) !== snapshot) {
@@ -285,6 +293,7 @@ async function runEnhance(btnEl) {
       tNotify('info', 'notify.truncated')
     }
   } catch (err) {
+    if (seq !== enhanceSeq) return // cancelled during retry backoff — stay quiet
     console.error('[prompt-enhancer] enhance failed:', err)
     tNotify('error', 'notify.failed', err?.message ?? String(err))
     $phase.set('idle')
@@ -304,6 +313,39 @@ function revert(btnEl) {
   }
   writeBack(editor, enhanceBackup)
   $phase.set('idle')
+}
+
+// WorkBuddy-parity spinner: 16px circle, stroke-dasharray "28 10", 1s linear
+// infinite rotation (extracted from WorkBuddy app.asar, EnhanceButton spinner).
+// Native DOM — color follows currentColor so the button's --ui-text-tertiary
+// drives it across light/dark themes.
+function Spinner() {
+  return jsx('span', {
+    style: {
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      width: '16px', height: '16px',
+      animation: 'pe-spin 1s linear infinite'
+    },
+    children: jsx('svg', {
+      width: 16, height: 16, viewBox: '0 0 16 16', fill: 'none',
+      children: jsx('circle', {
+        cx: 8, cy: 8, r: 6, stroke: 'currentColor', strokeWidth: 2,
+        strokeLinecap: 'round', strokeDasharray: '28 10'
+      })
+    })
+  })
+}
+
+// Keyframes can't be inline styles — inject once at register, remove on dispose.
+function injectSpinnerStyle() {
+  if (document.getElementById('prompt-enhancer-styles')) return
+  const el = document.createElement('style')
+  el.id = 'prompt-enhancer-styles'
+  el.textContent = '@keyframes pe-spin{to{transform:rotate(360deg)}}'
+  document.head.appendChild(el)
+}
+function removeSpinnerStyle() {
+  document.getElementById('prompt-enhancer-styles')?.remove()
 }
 
 function EnhanceButton() {
@@ -349,7 +391,12 @@ function EnhanceButton() {
 
   const onClick = () => {
     if (phase === 'enhanced') revert(btnRef.current)
-    else runEnhance(btnRef.current)
+    else if (phase === 'enhancing') {
+      // WorkBuddy parity: the spinning button is a cancel button. Bump the seq
+      // so the in-flight request's late result is discarded, drop back to idle.
+      enhanceSeq++
+      $phase.set('idle')
+    } else runEnhance(btnRef.current)
   }
 
   const tip = phase === 'enhancing' ? t('tip.enhancing') : phase === 'enhanced' ? t('tip.revert') : t('tip.idle')
@@ -360,17 +407,18 @@ function EnhanceButton() {
       'aria-label': tip,
       [BTN_ATTR]: '',
       className: GHOST_ICON_BTN,
-      disabled: phase === 'enhancing',
+      disabled: false, // spinner is a cancel button while enhancing (WorkBuddy parity)
       onClick,
       ref: btnRef,
       size: 'icon',
       type: 'button',
       variant: 'ghost',
-      children: jsx(Codicon, {
-        name: phase === 'enhanced' ? 'sparkle-filled' : 'sparkle',
-        size: '0.875rem',
-        spinning: phase === 'enhancing'
-      })
+      children: phase === 'enhancing'
+        ? jsx(Spinner, {})
+        : jsx(Codicon, {
+            name: phase === 'enhanced' ? 'sparkle-filled' : 'sparkle',
+            size: '0.875rem'
+          })
     })
   })
 }
@@ -413,6 +461,7 @@ export default {
   register(ctx) {
     const disposeI18n = ctx.i18n.register(LOCALES)
     ti18nStatic = ctx.i18n.t
+    injectSpinnerStyle()
 
     ctx.register({
       id: 'enhance-button',
@@ -432,6 +481,7 @@ export default {
     })
     ctx.onDispose?.(() => {
       disposeI18n?.()
+      removeSpinnerStyle()
       $phase.set('idle')
       enhanceBackup = ''
       lastApplied = ''
