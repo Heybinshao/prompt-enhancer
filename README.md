@@ -1,4 +1,4 @@
-# Prompt Enhancer for Hermes ![版本](https://img.shields.io/badge/版本-v1.0.8-blue)
+# Prompt Enhancer for Hermes ![版本](https://img.shields.io/badge/版本-v1.0.9-blue)
 
 【Hermes 桌面端插件】输入框「增强提示词」按钮——一句话草稿改写为结构化完整提示词。en / 简中 / 繁體。
 
@@ -51,6 +51,10 @@
 
 Settings → Plugins → Prompt Enhancer → 关闭开关；或直接删除 `~/.hermes/desktop-plugins/prompt-enhancer/` 文件夹后重启 Hermes。
 
+## 反馈
+
+装上了吗？用着如何？遇到报错（哪怕看不懂的）欢迎[提 issue](https://github.com/Heybinshao/prompt-enhancer/issues/new)——报错时附上 `~/.hermes/logs/desktop.log` 里 `[prompt-enhancer]` 开头的行即可，不用截图也不用复现步骤。也可以在微信公众号「宝藏彬少」后台直接留言。
+
 ## 边界与说明
 
 - 文件/引用 chip 与文本混合的草稿：引用标记原样保留，只增强文本部分
@@ -59,6 +63,7 @@ Settings → Plugins → Prompt Enhancer → 关闭开关；或直接删除 `~/.
 - **语音输入纠错**：草稿里的同音/近音错别字、口误漏字会被自动识别修正（如「全休」→「全修」），不确定是否错误时保持原样
 - **多会话状态隔离**：每个会话输入框的增强状态独立（转圈/恢复只作用于自己，取消不作废其他会话的请求）
 - **增强中可取消**：点 ✨ 后按钮变为转圈动画，**转圈期间再点一次即可取消**（立即拿回输入框，迟到的增强结果自动丢弃）；取消/完成后自动恢复
+- **限流重试可见**：触发 429 自动重试时按钮提示变为「限流重试中…」，不再是静默等待
 - **服务端 429 限流自动重试**：网关上游渠道偶发限流（`增强失败：… 429`）时插件自动退避重试（3s / 5s 各一次）；若重试后仍失败，稍等几秒再点一次即可——限流是网关侧的瞬时状态，与插件和账号无关
 - **固定增强用模型（Hermes 配置，非插件功能）**：默认继承当前会话模型（新会话走辅助模型）。想固定用某个模型，在 Hermes 的 `config.yaml` 加：
 

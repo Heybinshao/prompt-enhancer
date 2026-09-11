@@ -112,7 +112,7 @@ function editorState(editor) {
 // non-React handlers use ctx.i18n.t captured at register time.
 const LOCALES = {
   en: {
-    tip: { idle: 'Enhance prompt', enhancing: 'Enhancing…', revert: 'Revert to original' },
+    tip: { idle: 'Enhance prompt', enhancing: 'Enhancing…', retrying: 'Rate limited — retrying…', revert: 'Revert to original' },
     notify: {
       noEditor: 'Composer not found',
       notEditable: 'Composer is not editable right now',
@@ -130,7 +130,7 @@ const LOCALES = {
     }
   },
   zh: {
-    tip: { idle: '增强提示词', enhancing: '增强中…', revert: '恢复原文' },
+    tip: { idle: '增强提示词', enhancing: '增强中…', retrying: '限流重试中…', revert: '恢复原文' },
     notify: {
       noEditor: '未找到输入框',
       notEditable: '输入框当前不可编辑',
@@ -148,7 +148,7 @@ const LOCALES = {
     }
   },
   'zh-hant': {
-    tip: { idle: '增強提示詞', enhancing: '增強中…', revert: '恢復原文' },
+    tip: { idle: '增強提示詞', enhancing: '增強中…', retrying: '限流重試中…', revert: '恢復原文' },
     notify: {
       noEditor: '未找到輸入框',
       notEditable: '輸入框目前不可編輯',
@@ -226,7 +226,7 @@ function releaseLayoutFix(btnEl) {
   }
 }
 
-async function runEnhance(btnEl, onPhase) {
+async function runEnhance(btnEl, onPhase, onRetry) {
   const editor = resolveEditor(btnEl)
   if (!editor) return tNotify('error', 'notify.noEditor')
   if (!editor.isContentEditable) return tNotify('error', 'notify.notEditable')
@@ -280,6 +280,7 @@ async function runEnhance(btnEl, onPhase) {
         break
       } catch (e) {
         if (attempt < RETRY_DELAYS_MS.length && isRateLimited(e)) {
+          onRetry(attempt + 1) // surface "retrying" in the tooltip instead of silent backoff
           await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]))
           continue
         }
@@ -373,13 +374,16 @@ function EnhanceButton() {
   // the authoritative copy lives in stateByEditor (keyed by editor node) so
   // runEnhance/revert/MutationObserver can read/update it outside React.
   const [phase, setPhase] = useState('idle')
+  const [retrying, setRetrying] = useState(false)
   const phaseRef = useRef(phase)
   phaseRef.current = phase
   const syncPhase = useCallback((p) => {
     const editor = resolveEditor(btnRef.current)
     if (editor) editorState(editor).phase = p
+    if (p !== 'enhancing') setRetrying(false) // leaving enhancing clears retry flag
     setPhase(p)
   }, [])
+  const syncRetry = useCallback(() => setRetrying(true), [])
 
   // Auto-reset: once enhanced, the enhanced state only stays valid while the
   // editor still HOLDS the enhanced text. Sending clears the editor
@@ -429,10 +433,12 @@ function EnhanceButton() {
       // editor's seq so its in-flight request's late result is discarded.
       if (st) st.seq++
       syncPhase('idle')
-    } else runEnhance(btnRef.current, syncPhase)
+    } else runEnhance(btnRef.current, syncPhase, syncRetry)
   }
 
-  const tip = phase === 'enhancing' ? t('tip.enhancing') : phase === 'enhanced' ? t('tip.revert') : t('tip.idle')
+  const tip = phase === 'enhancing'
+    ? (retrying ? t('tip.retrying') : t('tip.enhancing'))
+    : phase === 'enhanced' ? t('tip.revert') : t('tip.idle')
 
   return jsx(Tip, {
     label: tip,
