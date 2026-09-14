@@ -65,15 +65,6 @@ function serializeEditor(node) {
   return block && text && el.dataset.slot !== RICH_INPUT_SLOT ? text + '\n' : text
 }
 
-function editorChildOps(text) {
-  const ops = []
-  String(text).split('\n').forEach((line, index) => {
-    if (index > 0) ops.push({ br: true })
-    if (line) ops.push({ text: line })
-  })
-  return ops
-}
-
 function stripWrappingQuotes(text) {
   return String(text).trim().replace(/^["'“”‘’「」『』]|["'“”‘’「」『』]$/g, '')
 }
@@ -100,7 +91,7 @@ const stateByEditor = new WeakMap() // editor → { phase, backup, lastApplied, 
 function editorState(editor) {
   let s = stateByEditor.get(editor)
   if (!s) {
-    s = { phase: 'idle', backup: '', lastApplied: '', seq: 0 }
+    s = { phase: 'idle', backup: '', lastApplied: '', seq: 0, slashKinds: null }
     stateByEditor.set(editor, s)
   }
   return s
@@ -179,12 +170,143 @@ function resolveEditor(btnEl) {
   return root?.querySelector(`[data-slot="${RICH_INPUT_SLOT}"]`) ?? null
 }
 
-function writeBack(editor, text) {
-  const frag = document.createDocumentFragment()
-  for (const op of editorChildOps(text)) {
-    if (op.br) frag.append(document.createElement('br'))
-    else frag.append(document.createTextNode(op.text))
+// ── Official-parity chip hydration (v1.1.0) ──
+// Mirror of rich-editor.ts appendComposerContents: when text arrives whole, the
+// official pipeline re-chips `@kind:value` refs and known `/command` tokens so
+// the composer shows the same pills the typed path would have committed. The
+// plugin writes back "whole text" too, so it must do the same — otherwise the
+// enhanced result loses the pill rendering the user's draft already had.
+// Chip DOM recipe mirrors refChipElement/slashChipElement (data-ref-text carries
+// the serialized literal; flush mirrors it back on submit — round-trip safe).
+const CHIP_REF_RE = /@(file|folder|url|image|tool|line|terminal|session):(\u0060[^\u0060\n]+\u0060|"[^"\n]+"|'[^'\n]+'|\S+)/g
+const CHIP_SLASH_RE = /(?<=^|\s)\/([a-zA-Z][\w-]*)(?![\w-]*\/)/g
+const CHIP_ICON_PATHS = {
+  file: ['M14 3v4a1 1 0 0 0 1 1h4','M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2','M9 9l1 0','M9 13l6 0','M9 17l6 0'],
+  folder: ['M5 19l2.757 -7.351a1 1 0 0 1 .936 -.649h12.307a1 1 0 0 1 .986 1.164l-.996 5.211a2 2 0 0 1 -1.964 1.625h-14.026a2 2 0 0 1 -2 -2v-11a2 2 0 0 1 2 -2h4l3 3h7a2 2 0 0 1 2 2v2'],
+  url: ['M9 15l6 -6','M11 6l.463 -.536a5 5 0 0 1 7.071 7.072l-.534 .464','M13 18l-.397 .534a5.068 5.068 0 0 1 -7.127 0a4.972 4.972 0 0 1 0 -7.071l.524 -.463'],
+  image: ['M15 8h.01','M3 6a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v12a3 3 0 0 1 -3 3h-12a3 3 0 0 1 -3 -3v-12','M3 16l5 -5c.928 -.893 2.072 -.893 3 0l5 5','M14 14l1 -1c.928 -.893 2.072 -.893 3 0l3 3'],
+  tool: ['M7 10h3v-3l-3.5 -3.5a6 6 0 0 1 8 8l6 6a2 2 0 0 1 -3 3l-6 -6a6 6 0 0 1 -8 -8l3.5 3.5'],
+  line: ['M5 9l14 0','M5 15l14 0','M11 4l-4 16','M17 4l-4 16'],
+  terminal: ['M5 7l5 5l-5 5','M12 19l7 0'],
+  session: ['M4 4h16v2.172a2 2 0 0 1 -.586 1.414l-4.414 4.414v7l-6 2v-8.5l-4.48 -4.928a2 2 0 0 1 -.52 -1.345v-2.227'],
+  command: ['M5 7l5 5l-5 5','M12 19l7 0'],
+  skill: ['M13 3l0 7l6 0l-8 11l0 -7l-6 0l8 -11']
+}
+const CHIP_LABELS = { file: 'Files', folder: 'Folders', url: 'Links', image: 'Images', tool: 'Tools', line: 'Lines', terminal: 'Terminal', session: 'Sessions', command: 'Commands', skill: 'Skills' }
+
+function chipIconSvg(kind) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+  svg.setAttribute('viewBox', '0 0 24 24')
+  svg.setAttribute('fill', 'none')
+  svg.setAttribute('stroke', 'currentColor')
+  svg.setAttribute('stroke-width', '2')
+  svg.setAttribute('stroke-linecap', 'round')
+  svg.setAttribute('stroke-linejoin', 'round')
+  for (const d of CHIP_ICON_PATHS[kind] ?? []) {
+    const p = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+    p.setAttribute('d', d)
+    svg.append(p)
   }
+  return svg
+}
+
+function unquoteRef(raw) {
+  const head = raw[0], tail = raw[raw.length - 1]
+  const quoted = (head === '`' && tail === '`') || (head === '"' && tail === '"') || (head === "'" && tail === "'")
+  return quoted ? raw.slice(1, -1) : raw.replace(/[,.;!?]+$/, '')
+}
+
+function quoteRefValue(value) {
+  if (!value.includes('`')) return '`' + value + '`'
+  if (!value.includes('"')) return '"' + value + '"'
+  if (!value.includes("'")) return "'" + value + "'"
+  return '`' + value.replace(/`/g, "'") + '`'
+}
+
+function refChipEl(kind, rawValue) {
+  const id = unquoteRef(rawValue)
+  const chip = document.createElement('span')
+  chip.contentEditable = 'false'
+  chip.title = id
+  chip.dataset.refText = '@' + kind + ':' + quoteRefValue(id)
+  chip.dataset.refId = id
+  chip.dataset.refKind = kind
+  chip.className = 'ref'
+  chip.dataset.ref = kind
+  chip.append(chipIconSvg(kind), document.createTextNode(id))
+  return chip
+}
+
+function slashChipEl(command, kind) {
+  const chip = document.createElement('span')
+  chip.contentEditable = 'false'
+  chip.dataset.refText = command
+  chip.dataset.slashKind = kind
+  chip.className = 'ref'
+  chip.dataset.ref = kind
+  chip.append(chipIconSvg(kind), document.createTextNode(command))
+  return chip
+}
+
+// Mirror of chipSpans: scan whole text, interleave text segments with chips.
+// Collect slash tokens that already exist as chips in the ORIGINAL draft.
+// Skill names are dynamic (backend catalog) and unknown to the plugin — but
+// any `/skill` the user committed as a chip carries data-slash-kind, so we
+// snapshot token→kind from the editor before enhancing and reuse it on
+// write-back. This is how enhanced results keep skill pills without knowing
+// the catalog.
+function collectDraftSlashChips(editor) {
+  const map = new Map()
+  for (const chip of editor.querySelectorAll('[data-slash-kind][data-ref-text]')) {
+    const token = chip.dataset.refText.replace(/^\//, '')
+    if (token) map.set(token, chip.dataset.slashKind)
+  }
+  return map
+}
+
+function chipSpansFor(text, extraSlashKinds) {
+  CHIP_REF_RE.lastIndex = 0
+  const spans = []
+  for (const m of text.matchAll(CHIP_REF_RE)) {
+    const start = m.index ?? 0
+    spans.push({ start, end: start + m[0].length, node: () => refChipEl(m[1], m[2]) })
+  }
+  for (const m of text.matchAll(CHIP_SLASH_RE)) {
+    // Chip 化只认原草稿里用户已确认过的 chip（token→kind 快照）——词表会过时，
+    // 快照不会；草稿里没有的 /word 保持纯文本，气泡渲染层仍会 pill 化，无损。
+    const kind = extraSlashKinds?.get(m[1])
+    if (!kind) continue
+    const start = m.index ?? 0
+    spans.push({ start, end: start + m[0].length, node: () => slashChipEl('/' + m[1], kind) })
+  }
+  return spans.sort((a, b) => a.start - b.start)
+}
+
+// Official appendComposerContents mirror: overlap guard + text-with-breaks.
+function appendChippedContents(target, text, extraSlashKinds) {
+  let cursor = 0
+  for (const span of chipSpansFor(text, extraSlashKinds)) {
+    if (span.start < cursor) continue
+    appendTextWithBreaks(target, text.slice(cursor, span.start))
+    target.append(span.node())
+    cursor = span.end
+  }
+  appendTextWithBreaks(target, text.slice(cursor))
+}
+
+function appendTextWithBreaks(target, text) {
+  const lines = String(text).split('\n')
+  lines.forEach((line, index) => {
+    if (index > 0) target.append(document.createElement('br'))
+    if (line) target.append(document.createTextNode(line))
+  })
+}
+
+function writeBack(editor, text, extraSlashKinds) {
+  // Chip-hydrated write-back (v1.1.0): same pipeline as an official paste —
+  // @refs and known /commands render as pills, everything else stays text.
+  const frag = document.createDocumentFragment()
+  appendChippedContents(frag, text, extraSlashKinds)
   editor.replaceChildren(frag)
   editor.focus()
   const range = document.createRange()
@@ -250,6 +372,7 @@ async function runEnhance(btnEl, onPhase, onRetry) {
   const sessionId = resolveSessionId(btnEl, () => host.state.activeSessionId.get())
 
   const snapshot = text
+  st.slashKinds = collectDraftSlashChips(editor) // skill pills from the original draft
   const seq = ++st.seq
   st.phase = 'enhancing'
   onPhase('enhancing')
@@ -300,7 +423,7 @@ async function runEnhance(btnEl, onPhase, onRetry) {
     }
     st.backup = snapshot
     st.lastApplied = cleaned
-    writeBack(editor, cleaned)
+    writeBack(editor, cleaned, st.slashKinds)
     st.phase = 'enhanced'
     onPhase('enhanced')
     if (looksTruncated(cleaned)) {
@@ -329,7 +452,7 @@ function revert(btnEl, onPhase) {
     onPhase('idle')
     return
   }
-  writeBack(editor, st.backup)
+  writeBack(editor, st.backup, st.slashKinds)
   st.phase = 'idle'
   onPhase('idle')
 }

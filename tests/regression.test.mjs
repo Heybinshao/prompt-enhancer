@@ -144,6 +144,41 @@ function await_import_fs() {
   return process.getBuiltinModule('fs')
 }
 
+
+// [v1.1.0] chip 化写回存在（保留官方 pill 渲染）
+test('R9: 写回管线含官方同款 chip hydration', () => {
+  const fs = process.getBuiltinModule('fs')
+  const src = fs.readFileSync(new URL('../plugin.js', import.meta.url), 'utf8')
+  assert.ok(/appendChippedContents\(frag, text/.test(src), 'writeBack 走 chip 化构建')
+  assert.ok(/CHIP_REF_RE/.test(src) && /CHIP_SLASH_RE/.test(src) && /collectDraftSlashChips/.test(src), 'ref+slash 扫描齐备，slash 走草稿快照')
+  assert.ok(/data-ref-text/.test(src), 'chip 携带序列化源（round-trip 安全）')
+  // 防误识别约束必须不存在（用户要保留渲染，不能让模板回避 token）
+  const m = src.match(/const SYSTEM_TEMPLATE = `(.*?)`/s)
+  assert.ok(m && !/输出格式防误识别/.test(m[1]), '模板无防误识别约束（已回滚）')
+})
+
+// [v1.1.0] chip 化纯快照驱动（无词表）：原草稿 chip 是唯一依据
+test('R10: slash chip 化只认原草稿快照，路径/陌生词不误报', () => {
+  const CHIP_SLASH_RE = /(?<=^|\s)\/([a-zA-Z][\w-]*)(?![\w-]*\/)/g
+  function scan(text, kinds) {
+    const out = []
+    for (const m of text.matchAll(CHIP_SLASH_RE)) {
+      const kind = kinds?.get(m[1])
+      if (kind) out.push('/' + m[1] + ':' + kind)
+    }
+    return out
+  }
+  const draftKinds = new Map([['caveman', 'skill']])
+  // 原草稿已有的 skill → chip 化
+  assert.deepEqual(scan('用 /caveman 风格写周报', draftKinds), ['/caveman:skill'])
+  // 陌生命令词（无快照）→ 纯文本
+  assert.deepEqual(scan('运行 /compact 清理', draftKinds), [])
+  // 路径不误报
+  assert.deepEqual(scan('检查 a/b/c 目录', draftKinds), [])
+  // 内置命令也必须来自快照（用户用过才保留）
+  const withCmd = new Map([['compact', 'command']])
+  assert.deepEqual(scan('运行 /compact 清理', withCmd), ['/compact:command'])
+})
 // ── 汇总 ──
 let fail = 0
 for (const [name, r] of results) {
