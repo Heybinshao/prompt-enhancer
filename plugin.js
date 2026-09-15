@@ -620,6 +620,7 @@ function dumpDom() {
 export default {
   id: ID,
   name: 'Prompt Enhancer',
+  description: '输入框 ✨ 按钮：一句话草稿改写为任务/范围/约束/输出形式齐整的结构化提示词，再点恢复原文。',
   register(ctx) {
     const disposeI18n = ctx.i18n.register(LOCALES)
     ti18nStatic = ctx.i18n.t
