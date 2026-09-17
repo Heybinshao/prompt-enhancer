@@ -1,0 +1,14 @@
+name: prompt-enhancer
+version: 1.2.0
+description: "A button in the Hermes Desktop composer that rewrites a rough draft into a structured prompt (task / scope / constraints / output shape), with one more click to restore the original. Stateless single gateway call, preserves @file and /command chips, per-session state."
+author: Heybinshao
+license: MIT
+homepage: https://github.com/Heybinshao/prompt-enhancer
+tags: [desktop, composer, prompt, llm]
+# Desktop-only package: the UI lives in desktop/plugin.js and registers nothing
+# on the agent side (no tools, hooks, middleware or env vars).
+provides_tools: []
+provides_hooks: []
+capabilities: []
+requires_env: []
+python_dependencies: []

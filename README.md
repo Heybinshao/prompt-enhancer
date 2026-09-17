@@ -1,4 +1,4 @@
-# Prompt Enhancer for Hermes ![版本](https://img.shields.io/badge/版本-v1.1.0-blue)
+# Prompt Enhancer for Hermes ![版本](https://img.shields.io/badge/版本-v1.2.0-blue)
 
 【Hermes 桌面端插件】输入框「增强提示词」按钮——一句话草稿改写为结构化完整提示词。en / 简中 / 繁體。
 
@@ -12,7 +12,21 @@
 
 ## 安装
 
-**方式一：让 Hermes 帮你装（推荐）**
+**方式一：官方插件目录（推荐）**
+
+```bash
+hermes plugins install prompt-enhancer
+```
+
+装完重启 Hermes 桌面端（⌘Q 后重新打开）即可。升级：
+
+```bash
+hermes plugins update prompt-enhancer
+```
+
+> 目录条目钉在某个已评审的 commit 上——作者仓库的后续提交不会自动进目录，实际装到的版本以插件卡片上的版本号为准。
+
+**方式二：从 Git 安装（装仓库最新提交）**
 
 对 Hermes 说：
 
@@ -20,13 +34,15 @@
 从 Git 安装这个桌面插件：https://github.com/Heybinshao/prompt-enhancer
 ```
 
-明确说「从 Git 安装」，Hermes 会把整个仓库 clone 进 `~/.hermes/desktop-plugins/`，留下 Git 来源记录——以后想升级，重做一遍上述安装即可拉最新版（弹窗里勾「强制重装」）。也可以走桌面端「技能与工具 → 插件」页面上方的「从 Git 安装」按钮，效果相同。
+也可以走桌面端「技能与工具 → 插件」页面上方的「从 Git 安装」按钮。这条路径装的是仓库当前提交（没有经过目录评审）；升级方式：重做一遍上述安装，弹窗里勾「强制重装」。
 
-**方式二：手动放置**
+**方式三：手动放置**
 
-1. 下载本仓库的 `plugin.js`
+1. 下载本仓库的 [`desktop/plugin.js`](desktop/plugin.js)
 2. 放到 `~/.hermes/desktop-plugins/prompt-enhancer/plugin.js`（文件夹名必须叫 `prompt-enhancer`）
 3. 重启 Hermes 桌面端（⌘Q 后重新打开）
+
+> ⚠️ 插件入口在仓库的 `desktop/` 子目录里，别把整个仓库 clone 进 `~/.hermes/desktop-plugins/`——多出一层目录，宿主就找不到入口文件了。
 
 ## 界面预览
 

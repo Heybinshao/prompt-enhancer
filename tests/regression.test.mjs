@@ -118,7 +118,7 @@ test('R6: 不同 editor 的初始态互不共享', () => {
 test('R7: SYSTEM_TEMPLATE 含语音纠错原则与全休→全修示例', () => {
   // 用例读磁盘 plugin.js，防模板被改丢
   const fs = await_import_fs()
-  const src = fs.readFileSync(new URL('../plugin.js', import.meta.url), 'utf8')
+  const src = fs.readFileSync(new URL('../desktop/plugin.js', import.meta.url), 'utf8')
   const m = src.match(/const SYSTEM_TEMPLATE = `(.*?)`/s)
   assert.ok(m, 'SYSTEM_TEMPLATE 存在')
   assert.ok(/语音输入/.test(m[1]), '含语音输入纠错')
@@ -148,7 +148,7 @@ function await_import_fs() {
 // [v1.1.0] chip 化写回存在（保留官方 pill 渲染）
 test('R9: 写回管线含官方同款 chip hydration', () => {
   const fs = process.getBuiltinModule('fs')
-  const src = fs.readFileSync(new URL('../plugin.js', import.meta.url), 'utf8')
+  const src = fs.readFileSync(new URL('../desktop/plugin.js', import.meta.url), 'utf8')
   assert.ok(/appendChippedContents\(frag, text/.test(src), 'writeBack 走 chip 化构建')
   assert.ok(/CHIP_REF_RE/.test(src) && /CHIP_SLASH_RE/.test(src) && /collectDraftSlashChips/.test(src), 'ref+slash 扫描齐备，slash 走草稿快照')
   assert.ok(/data-ref-text/.test(src), 'chip 携带序列化源（round-trip 安全）')
