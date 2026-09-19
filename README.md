@@ -1,4 +1,4 @@
-# Prompt Enhancer for Hermes ![版本](https://img.shields.io/badge/版本-v1.2.0-blue)
+# Prompt Enhancer for Hermes ![版本](https://img.shields.io/badge/版本-v1.3.0-blue)
 
 【Hermes 桌面端插件】输入框「增强提示词」按钮——一句话草稿改写为结构化完整提示词。en / 简中 / 繁體。
 
@@ -62,7 +62,7 @@ hermes plugins update prompt-enhancer
 | 空输入框点 ✨ | 提示无可增强内容 |
 
 - **模型路由**：继承当前会话的模型——主会话用主会话的，瓦片会话用瓦片自己的（多会话场景精确归属）
-- **多行布局**：草稿换行后输入框进入堆叠布局（官方行为），按钮始终紧贴模型选择器左侧
+- **多行布局**：草稿换行后输入框进入堆叠布局（官方行为）；按钮位于控件行内，多行态下可能靠行首（官方控件行布局问题，已提 hermes-agent#116332 待修复）
 - **发送后**：按钮自动回到空闲态（增强结果已随消息发出）
 
 ## 卸载

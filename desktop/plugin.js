@@ -15,7 +15,7 @@
  * own `justify-end` pack both right in every mode. Purely cosmetic inline
  * style; MutationObserver re-asserts after React remounts; disposed cleanly.
  */
-import { COMPOSER_AREAS, Button, Codicon, Tip, PALETTE_AREA, host, usePluginI18n } from '@hermes/plugin-sdk'
+import { COMPOSER_AREAS, Button, Codicon, Tip, host, usePluginI18n } from '@hermes/plugin-sdk'
 import { jsx } from 'react/jsx-runtime'
 import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 
@@ -115,9 +115,7 @@ const LOCALES = {
       truncated: 'Result may be truncated — click the button to revert',
       emptyDraft: 'Composer is empty — nothing to enhance',
       empty: 'Enhancement came back empty',
-      failed: (m) => `Enhance failed: ${m}`,
-      dumped: 'DOM structure written to log',
-      noBtn: 'Button not found'
+      failed: (m) => `Enhance failed: ${m}`
     }
   },
   zh: {
@@ -133,9 +131,7 @@ const LOCALES = {
       truncated: '结果可能被截断，可点击按钮恢复原文',
       emptyDraft: '输入框为空，没有可增强的内容',
       empty: '增强结果为空',
-      failed: (m) => `增强失败：${m}`,
-      dumped: 'DOM 结构已写入日志',
-      noBtn: '按钮未找到'
+      failed: (m) => `增强失败：${m}`
     }
   },
   'zh-hant': {
@@ -151,18 +147,16 @@ const LOCALES = {
       truncated: '結果可能被截斷，可點擊按鈕恢復原文',
       emptyDraft: '輸入框為空，沒有可增強的內容',
       empty: '增強結果為空',
-      failed: (m) => `增強失敗：${m}`,
-      dumped: 'DOM 結構已寫入日誌',
-      noBtn: '按鈕未找到'
+      failed: (m) => `增強失敗：${m}`
     }
   }
 }
 
-let ti18nStatic = null // captured at register; null before → zh fallback
+let ti18nStatic = null // captured at register; null before → raw-key fallback
 
 function tNotify(kind, key, ...args) {
   const msg = ti18nStatic ? ti18nStatic(key, ...args) : null
-  host.notify({ kind, message: msg ?? `[增强提示词] ${key}` })
+  host.notify({ kind, message: msg ?? `[prompt-enhancer] ${key}` })
 }
 
 function resolveEditor(btnEl) {
@@ -328,25 +322,12 @@ function isRateLimited(err) {
   return /429|rate.?limit/i.test(`${err?.message ?? ''} ${err?.name ?? ''} ${String(err)}`)
 }
 
-// Layout fix: zero the official cluster's ml-auto so the parent's justify-end
-// packs [us, cluster] right in both inline and stacked modes.
-function applyLayoutFix(btnEl) {
-  const row = btnEl?.parentElement
-  if (!row) return
-  for (const sib of row.children) {
-    if (sib !== btnEl && /\bml-auto\b/.test(String(sib.className))) {
-      sib.style.marginLeft = '0'
-    }
-  }
-}
-
-function releaseLayoutFix(btnEl) {
-  const row = btnEl?.parentElement
-  if (!row) return
-  for (const sib of row.children) {
-    if (sib.style?.marginLeft === '0') sib.style.marginLeft = ''
-  }
-}
+// (v1.3.0) The old applyLayoutFix/releaseLayoutFix pair zeroed ml-auto on the
+// app's own controls-row siblings and re-asserted via MutationObserver —
+// ruled outside the catalog's SDK surface (plugin-catalog README rule 8).
+// Removed; the row-stacking layout gap is filed upstream as an apps/desktop
+// issue instead. Until that lands, in multi-line composer states the button
+// may sit at the left edge of the controls row (known, documented in README).
 
 async function runEnhance(btnEl, onPhase, onRetry) {
   const editor = resolveEditor(btnEl)
@@ -531,21 +512,6 @@ function EnhanceButton() {
     return () => mo.disconnect()
   }, [phase])
 
-  // Layout fix lifecycle: apply now, re-assert when React remounts siblings,
-  // release on unmount. Scoped to this button's own controls row.
-  useLayoutEffect(() => {
-    const btn = btnRef.current
-    if (!btn) return
-    applyLayoutFix(btn)
-    const row = btn.parentElement
-    const mo = new MutationObserver(() => applyLayoutFix(btn))
-    if (row) mo.observe(row, { childList: true, subtree: false, attributes: true, attributeFilter: ['class'] })
-    return () => {
-      mo.disconnect()
-      releaseLayoutFix(btn)
-    }
-  }, [])
-
   const onClick = () => {
     const editor = resolveEditor(btnRef.current)
     const st = editor ? editorState(editor) : null
@@ -585,42 +551,10 @@ function EnhanceButton() {
   })
 }
 
-function dumpDom() {
-  const btn = document.querySelector(`[${BTN_ATTR}]`)
-  if (!btn) {
-    tNotify('error', 'notify.noBtn')
-    return
-  }
-  const lines = []
-  let el = btn
-  let depth = 0
-  while (el && el !== document.body && depth < 14) {
-    const cls = typeof el.className === 'string' ? el.className : ''
-    const slot = el.getAttribute?.('data-slot') ?? ''
-    lines.push(
-      `${'  '.repeat(depth)}<${el.tagName?.toLowerCase()}> slot=${slot}` +
-      `${cls.includes('grid-area') ? ' [GRID-AREA]' : ''}${cls.includes('justify-end') ? ' [j-END]' : ''}` +
-      `${cls.includes('ml-auto') ? ' [ML-AUTO]' : ''} cls=${cls.slice(0, 110)}`
-    )
-    el = el.parentElement
-    depth++
-  }
-  const parent = btn.parentElement
-  if (parent) {
-    lines.push('--- siblings of button (the controls row) ---')
-    for (const s of parent.children) {
-      const cs = getComputedStyle(s)
-      lines.push(`  sib: <${s.tagName.toLowerCase()}> ml=${cs.marginLeft} cls=${String(s.className).slice(0, 90)}`)
-    }
-  }
-  console.error(`[prompt-enhancer][DOM-DUMP]\n${lines.join('\n')}`)
-  tNotify('info', 'notify.dumped')
-}
-
 export default {
   id: ID,
   name: 'Prompt Enhancer',
-  description: '输入框 ✨ 按钮：一句话草稿改写为任务/范围/约束/输出形式齐整的结构化提示词，再点恢复原文。',
+  description: 'A composer ✨ button that rewrites a rough draft into a structured prompt (task / scope / constraints / output shape) and restores the original on a second click.',
   register(ctx) {
     const disposeI18n = ctx.i18n.register(LOCALES)
     ti18nStatic = ctx.i18n.t
@@ -632,21 +566,10 @@ export default {
       order: 100,
       render: () => jsx(EnhanceButton, {})
     })
-    ctx.register({
-      id: 'dom-dump',
-      area: PALETTE_AREA,
-      data: {
-        id: 'dom-dump',
-        label: 'Dump composer DOM (prompt-enhancer)',
-        keywords: ['dump', 'composer', 'dom', 'debug', 'prompt'],
-        run: dumpDom
-      }
-    })
     ctx.onDispose?.(() => {
       disposeI18n?.()
       removeSpinnerStyle()
       ti18nStatic = null
-      document.querySelectorAll(`[${BTN_ATTR}]`).forEach(releaseLayoutFix)
     })
     console.error(`[prompt-enhancer] registered (M1+layoutfix) into ${COMPOSER_AREAS.actions}`)
   }
