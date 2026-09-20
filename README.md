@@ -1,5 +1,7 @@
 # Prompt Enhancer for Hermes ![版本](https://img.shields.io/badge/版本-v1.3.0-blue)
 
+[![Hermes 官方插件目录](https://img.shields.io/badge/Hermes_官方插件目录-已收录-blue)](https://hermes-agent.nousresearch.com/docs/plugins)
+
 【Hermes 桌面端插件】输入框「增强提示词」按钮——一句话草稿改写为结构化完整提示词。en / 简中 / 繁體。
 
 ![prompt-enhancer](assets/cover.jpg)
@@ -12,7 +14,7 @@
 
 ## 安装
 
-**方式一：官方插件目录（推荐）**
+**方式一：官方插件目录（推荐，已通过官方审查收录）**
 
 ```bash
 hermes plugins install prompt-enhancer
