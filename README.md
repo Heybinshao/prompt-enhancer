@@ -1,4 +1,4 @@
-# Prompt Enhancer for Hermes ![版本](https://img.shields.io/badge/版本-v1.4.0-blue)
+# Prompt Enhancer for Hermes ![版本](https://img.shields.io/badge/版本-v1.4.1-blue)
 
 [![Hermes 官方插件目录](https://img.shields.io/badge/Hermes_官方插件目录-已收录-blue)](https://hermes-agent.nousresearch.com/docs/plugins)
 
