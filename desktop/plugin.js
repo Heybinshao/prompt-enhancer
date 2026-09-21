@@ -5,7 +5,9 @@
  * (ModelCatalogMenu, "edit models" hidden) carrying OUR own enable toggle:
  * off = Hermes main model (request sent bare — no session inherit),
  * on = the pinned model sent as llm.oneshot provider/model params.
- * Older hosts ignore the params silently.
+ * Hosts without the provider/model passthrough reject the pinned request
+ * (contract extra=forbid → 4000 "out of sync"); the plain main-model path
+ * works everywhere. Upstream support PR pending for hermes-agent.
  *   - read:  simplified composerPlainText replica (rich-editor.ts semantics)
  *   - write: DOM rebuild + native InputEvent → official flush mirrors to store
  *   - model: main model by default; the ⌘+click pin overrides it when toggled on
@@ -112,8 +114,9 @@ function editorState(editor) {
 // model.default, NOT the live session's model. Toggle ON → the pinned model
 // wins via llm.oneshot's provider/model params (explicit route beats
 // session/default). Picking a model auto-enables; disabling keeps the pick.
-// Hosts without the passthrough ignore the params silently → degrade to the
-// old inherit behavior instead of breaking enhancement.
+// Hosts without the llm.oneshot provider/model passthrough answer 4000
+// "out of sync" for PINNED requests only — bare/main-model enhancement never
+// touches the new params and works on every host (upstream PR pending).
 let storageApi = null          // ctx.storage, captured at register
 let modelPin = null            // { enabled, provider, model } | null
 const pinListeners = new Set() // re-render buttons whose tooltip shows the pin
@@ -432,8 +435,9 @@ async function runEnhance(btnEl, onPhase, onRetry) {
     if (pin) {
       if (sessionId) req.session_id = sessionId
       // M2: an enabled ⌘+click pin wins over session/default routing (host
-      // llm.oneshot provider/model passthrough; older hosts ignore the params
-      // silently and just inherit the session).
+      // llm.oneshot provider/model passthrough; hosts without it reject this
+      // request with 4000 out-of-sync — enhancement stays usable with the
+      // toggle off, which needs no new host surface).
       req.provider = pin.provider
       req.model = pin.model
     }
