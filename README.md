@@ -1,4 +1,4 @@
-# Prompt Enhancer for Hermes ![版本](https://img.shields.io/badge/版本-v1.4.1-blue)
+# Prompt Enhancer for Hermes ![版本](https://img.shields.io/badge/版本-v1.5.0-blue)
 
 [![Hermes 官方插件目录](https://img.shields.io/badge/Hermes_官方插件目录-已收录-blue)](https://hermes-agent.nousresearch.com/docs/plugins)
 
@@ -102,7 +102,7 @@ hermes plugins update prompt-enhancer
 
 ## 工作原理
 
-按钮注入官方 `composer.actions` 贡献区；读取草稿（复刻官方 `composerPlainText` 序列化语义）→ 调用 `llm.oneshot` 网关 RPC（无状态、不污染 prompt cache；默认裸请求落主模型，⌘+点击选过模型则附带 provider/model 参数显式钉路——该参数需宿主支持，旧版宿主会以 4000 out-of-sync 拒绝）→ DOM 写回 + 官方 input 事件镜像进草稿 store。写回前做快照比对，草稿在等待期被手改则放弃应用——绝不覆盖用户的字。
+按钮注入官方 `composer.actions` 贡献区；读取草稿优先走官方 `host.composer` 草稿接口（`getDraft` / `setDraft`，按会话寻址，`@引用` 与 `/命令` 由应用自己水化成 chip），旧版桌面端自动回落到内置的 `composerPlainText` 同语义实现 + DOM 写回 → 调用 `llm.oneshot` 网关 RPC（无状态、不污染 prompt cache；默认裸请求落主模型，⌘+点击选过模型则附带 provider/model 参数显式钉路——该参数需宿主支持，旧版宿主会以 4000 out-of-sync 拒绝）。写回前做快照比对，草稿在等待期被手改则放弃应用——绝不覆盖用户的字。
 
 ## 关于作者
 

@@ -387,6 +387,22 @@ function isRateLimited(err) {
   return /429|rate.?limit/i.test(`${err?.message ?? ''} ${err?.name ?? ''} ${String(err)}`)
 }
 
+// ── host.composer draft API (hermes-agent #120907) ────────────────────────
+// On hosts exposing host.composer the whole read/write pair goes through the
+// app's own paint path: getDraft answers with the live text (our serializer's
+// semantics — refText → literal token), setDraft re-hydrates @ref / `/`
+// tokens into chips exactly like an official paste (the app's
+// renderComposerContents). Our hand-rolled serialize/writeBack/chip layer
+// below is therefore LEGACY — kept only for desktop releases predating the
+// API, plus the last-resort fallback when the SDK write answers false (its
+// fail-closed contract = no mounted surface claimed the address, e.g. the
+// user switched away while the LLM call ran — the button's own editor is
+// still the surface the user clicked).
+function sdkComposer() {
+  const c = host.composer
+  return c && typeof c.getDraft === 'function' && typeof c.setDraft === 'function' ? c : null
+}
+
 async function runEnhance(btnEl, onPhase, onRetry) {
   const editor = resolveEditor(btnEl)
   if (!editor) return tNotify('error', 'notify.noEditor')
@@ -397,14 +413,6 @@ async function runEnhance(btnEl, onPhase, onRetry) {
   // official renderer rebuilds them on write-back (REF_RE chipSpans) — so a
   // mixed draft is enhanceable: we protect the chip tokens in the template.
   const hasChips = editor.querySelector('[data-ref-text]') !== null
-  const text = serializeEditor(editor)
-  if (!text.trim()) {
-    // Images/attachments alone (no text) land here — tell the user instead of
-    // silently no-oping (v3 §1 said "no-op", user feedback corrected it).
-    tNotify('info', 'notify.emptyDraft')
-    return
-  }
-  if (text.length > MAX_INPUT_CHARS) return tNotify('error', 'notify.tooLong', text.length, MAX_INPUT_CHARS)
   // Routing (user spec): pin enabled → session_id + explicit provider/model
   // (the pin wins over the session's model). Pin off / never picked → send the
   // request BARE (no session_id): llm.oneshot's auto arm then lands on the
@@ -412,9 +420,24 @@ async function runEnhance(btnEl, onPhase, onRetry) {
   // run — the picker is the only thing that steers enhancement.
   const sessionId = resolveSessionId(btnEl, () => host.state.activeSessionId.get())
   const pin = effectivePin()
+  // SDK read: null (no surface answers) falls back to the legacy serializer
+  // so a half-wired host never loses the read.
+  const c = sdkComposer()
+  const draftText = c ? await c.getDraft(sessionId) : null
+  const text = draftText ?? serializeEditor(editor)
+  if (!text.trim()) {
+    // Images/attachments alone (no text) land here — tell the user instead of
+    // silently no-oping (v3 §1 said "no-op", user feedback corrected it).
+    tNotify('info', 'notify.emptyDraft')
+    return
+  }
+  if (text.length > MAX_INPUT_CHARS) return tNotify('error', 'notify.tooLong', text.length, MAX_INPUT_CHARS)
 
   const snapshot = text
-  st.slashKinds = collectDraftSlashChips(editor) // skill pills from the original draft
+  // Draft-unchanged guard: re-read the live draft and compare TEXT (SDK hosts
+  // answer with the same authoritative string the read gave us; serializeEditor
+  // stays the fallback). Prevents writing an enhancement onto text the user
+  // kept editing while the LLM was thinking.
   const seq = ++st.seq
   st.phase = 'enhancing'
   onPhase('enhancing')
@@ -465,7 +488,8 @@ async function runEnhance(btnEl, onPhase, onRetry) {
     if (seq !== st.seq) return
     const cleaned = stripWrappingQuotes(String(res?.text ?? ''))
     if (!cleaned.trim()) throw new Error('empty')
-    if (serializeEditor(editor) !== snapshot) {
+    const live = c ? await c.getDraft(sessionId) : null
+    if ((live ?? serializeEditor(editor)) !== snapshot) {
       tNotify('info', 'notify.draftChanged')
       st.phase = 'idle'
       onPhase('idle')
@@ -473,7 +497,25 @@ async function runEnhance(btnEl, onPhase, onRetry) {
     }
     st.backup = snapshot
     st.lastApplied = cleaned
-    writeBack(editor, cleaned, st.slashKinds)
+    // SDK write first (the app re-hydrates @ref / `/` tokens into chips on
+    // paint); a false/throw means no mounted surface claimed the address —
+    // fall back to the legacy DOM writer, which always targets the button's
+    // own editor, i.e. the surface the user actually clicked.
+    let applied = false
+    if (c) {
+      try { applied = await c.setDraft(sessionId, cleaned) } catch { applied = false }
+    }
+    if (!applied) {
+      st.slashKinds = collectDraftSlashChips(editor)
+      writeBack(editor, cleaned, st.slashKinds)
+    } else {
+      // The app normalizes on paint (a known `/token` becomes a pill, a ref
+      // token gains its canonical quoting) — store the composer's OWN text so
+      // the auto-reset observer and revert's stale check compare like with
+      // like instead of tripping on that normalization.
+      const painted = await c.getDraft(sessionId)
+      if (typeof painted === 'string') st.lastApplied = painted
+    }
     st.phase = 'enhanced'
     onPhase('enhanced')
     if (looksTruncated(cleaned)) {
@@ -488,7 +530,7 @@ async function runEnhance(btnEl, onPhase, onRetry) {
   }
 }
 
-function revert(btnEl, onPhase) {
+async function revert(btnEl, onPhase) {
   const editor = resolveEditor(btnEl)
   if (!editor) {
     const st = editorState(editor ?? btnEl?.closest?.('[data-slot="composer-root"]')?.querySelector(`[data-slot="${RICH_INPUT_SLOT}"]`))
@@ -496,13 +538,23 @@ function revert(btnEl, onPhase) {
     return
   }
   const st = editorState(editor)
-  if (serializeEditor(editor) !== st.lastApplied) {
+  const c = sdkComposer()
+  const sessionId = resolveSessionId(btnEl, () => host.state.activeSessionId.get())
+  const live = c ? await c.getDraft(sessionId) : null
+  if ((live ?? serializeEditor(editor)) !== st.lastApplied) {
     tNotify('info', 'notify.revertStale')
     st.phase = 'idle'
     onPhase('idle')
     return
   }
-  writeBack(editor, st.backup, st.slashKinds)
+  let applied = false
+  if (c) {
+    try { applied = await c.setDraft(sessionId, st.backup) } catch { applied = false }
+  }
+  if (!applied) {
+    if (!st.slashKinds) st.slashKinds = collectDraftSlashChips(editor)
+    writeBack(editor, st.backup, st.slashKinds)
+  }
   st.phase = 'idle'
   onPhase('idle')
 }
@@ -599,7 +651,7 @@ function EnhanceButton() {
     const editor = resolveEditor(btnRef.current)
     const st = editor ? editorState(editor) : null
     const current = st?.phase ?? phaseRef.current
-    if (current === 'enhanced') revert(btnRef.current, syncPhase)
+    if (current === 'enhanced') void revert(btnRef.current, syncPhase)
     else if (current === 'enhancing') {
       // WorkBuddy parity: the spinning button is a cancel button. Bump THIS
       // editor's seq so its in-flight request's late result is discarded.
