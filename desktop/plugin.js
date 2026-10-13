@@ -647,6 +647,6 @@ export default {
       storageApi = null
       pinListeners.clear()
     })
-    console.error(`[prompt-enhancer] registered (M2) into ${COMPOSER_AREAS.actions}`)
+    console.error(`[prompt-enhancer] registered (M2+pure-sdk) into ${COMPOSER_AREAS.actions}`)
   }
 }

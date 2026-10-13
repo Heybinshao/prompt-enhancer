@@ -1,5 +1,5 @@
 name: prompt-enhancer
-version: 1.6.0
+version: 1.6.1
 requires_hermes: ">=0.21.5"
 description: "A button in the Hermes Desktop composer that rewrites a rough draft into a structured prompt (task / scope / constraints / output shape), with one more click to restore the original. Stateless single gateway call, preserves @file and /command chips, per-session state."
 author: Heybinshao
