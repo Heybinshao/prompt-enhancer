@@ -556,7 +556,11 @@ function EnhanceButton() {
               children: phase === 'enhancing'
                 ? jsx(Spinner, {})
                 : jsx(Codicon, {
-                    name: phase === 'enhanced' ? 'sparkle-filled' : 'sparkle',
+                    // The icon tracks the action available, not the event that
+                    // just happened: once enhanced, the only thing this button
+                    // can still do is go back to the original draft → return
+                    // arrow, not a static done-marker.
+                    name: phase === 'enhanced' ? 'discard' : 'sparkle',
                     size: '0.875rem'
                   })
             })
