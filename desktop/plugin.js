@@ -1,34 +1,24 @@
 /**
  * Prompt Enhancer — composer "enhance prompt" button for Hermes desktop.
  *
- * M1 core loop. M2: ⌘+click opens the official model picker
- * (ModelCatalogMenu, "edit models" hidden) carrying OUR own enable toggle:
- * off = Hermes main model (request sent bare — no session inherit),
- * on = the pinned model sent as llm.oneshot provider/model params.
- * Hosts without the provider/model passthrough reject the pinned request
- * (contract extra=forbid → 4000 "out of sync"); the plain main-model path
- * works everywhere. Upstream support PR pending for hermes-agent.
+ * M1 core loop: one click rewrites the draft into a structured prompt, a
+ * second click restores the original.
  *   - read:  host.composer.getDraft (official session-addressed draft)
  *   - write: host.composer.setDraft — the app re-hydrates @ref / `/` tokens
- *   - model: main model by default; the ⌘+click pin overrides it when toggled on
+ *   - model: the request is sent BARE (no session_id), so llm.oneshot's auto
+ *            arm lands on the configured main model. To pin a dedicated model
+ *            for enhancement, set `auxiliary.prompt_enhancement` in config.yaml
+ *            — the plugin has no model picker of its own.
  *   - A2:    write-back only when draft untouched during the wait
  * Pure-SDK build (catalog review #121246): no DOM write path and no legacy
  * fallback — hosts without the draft API are gated out via requires_hermes.
  *
- * Layout fix (stacked mode): the official controls cluster wraps itself in an
- * `ml-auto` div. Single-line the controls grid cell is `auto`-sized (no free
- * space → no visible gap); stacked it is `1fr` → the elastic ml-auto eats ALL
- * free space and orphanes our button at the cell's far left (next to "+").
- * Fix: inline-zero the sibling cluster's marginLeft and let the parent row's
- * own `justify-end` pack both right in every mode. Purely cosmetic inline
- * style; MutationObserver re-asserts after React remounts; disposed cleanly.
+ * Stacked layout: contributed actions group with the send cluster natively
+ * (upstream #116942) — no plugin-side layout workaround is needed or shipped.
  */
-import {
-  COMPOSER_AREAS, Button, Codicon, DropdownMenu, DropdownMenuContent, DropdownMenuItem,
-  DropdownMenuTrigger, ModelCatalogMenu, ModelMenuCloseContext, SegmentedControl, Tip, host, usePluginI18n
-} from '@hermes/plugin-sdk'
+import { COMPOSER_AREAS, Button, Codicon, Tip, host, usePluginI18n } from '@hermes/plugin-sdk'
 import { jsx } from 'react/jsx-runtime'
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 
 const ID = 'prompt-enhancer'
 const MAX_INPUT_CHARS = 8000
@@ -94,59 +84,13 @@ function editorState(editor) {
   return s
 }
 
-// ── Enhance model pin (⌘+click picker, M2) ───────────────────────────────
-// One global pin for every composer, stored via ctx.storage as
-// { enabled, provider, model }. Semantics (user spec): toggle OFF (or never
-// picked) → enhance runs on Hermes' configured MAIN model — the request is
-// sent bare (no session_id), so llm.oneshot's auto arm lands on
-// model.default, NOT the live session's model. Toggle ON → the pinned model
-// wins via llm.oneshot's provider/model params (explicit route beats
-// session/default). Picking a model auto-enables; disabling keeps the pick.
-// Hosts without the llm.oneshot provider/model passthrough answer 4000
-// "out of sync" for PINNED requests only — bare/main-model enhancement never
-// touches the new params and works on every host (upstream PR pending).
-let storageApi = null          // ctx.storage, captured at register
-let modelPin = null            // { enabled, provider, model } | null
-const pinListeners = new Set() // re-render buttons whose tooltip shows the pin
-
-function loadPin() {
-  try {
-    const v = storageApi?.get('enhanceModel')
-    if (v && typeof v === 'object') {
-      const provider = typeof v.provider === 'string' ? v.provider : ''
-      const model = typeof v.model === 'string' ? v.model : ''
-      // Pre-toggle storage (a bare { provider, model }) reads as enabled.
-      return { enabled: v.enabled !== false, provider, model }
-    }
-  } catch { /* corrupted storage → default */ }
-  return null
-}
-
-// Merge-patch the pin, persist, broadcast. The record is always written whole
-// (never removed) so a disabled toggle survives restarts.
-function setModelPin(patch) {
-  modelPin = { enabled: false, provider: '', model: '', ...(modelPin ?? {}), ...patch }
-  try { storageApi?.set('enhanceModel', modelPin) } catch { /* best-effort */ }
-  for (const fn of pinListeners) { try { fn(modelPin) } catch { /* one bad listener must not break the rest */ } }
-}
-
-// The pin that actually routes a request: enabled AND fully specified.
-function effectivePin() {
-  return modelPin?.enabled && modelPin.provider && modelPin.model ? modelPin : null
-}
-
 // ── i18n via official channel (v3 §3-⑩) ──
 // ctx.i18n.register(LOCALES): nested tree, dot-path keys, interpolator fns.
 // Components read via usePluginI18n(ID) (reactive on locale switch);
 // non-React handlers use ctx.i18n.t captured at register time.
 const LOCALES = {
   en: {
-    tip: { idle: 'Enhance prompt', enhancing: 'Enhancing…', retrying: 'Rate limited — retrying…', revert: 'Revert to original', pinned: (m) => `Enhance prompt (${m})` },
-    menu: {
-      custom: 'Custom model', off: 'Off', on: 'On',
-      statusMain: 'Current: main model',
-      statusPick: 'Turn on, then pick a model above'
-    },
+    tip: { idle: 'Enhance prompt', enhancing: 'Enhancing…', retrying: 'Rate limited — retrying…', revert: 'Revert to original' },
     notify: {
       noEditor: 'Composer not found',
       notEditable: 'Composer is not editable right now',
@@ -162,12 +106,7 @@ const LOCALES = {
     }
   },
   zh: {
-    tip: { idle: '增强提示词', enhancing: '增强中…', retrying: '限流重试中…', revert: '恢复原文', pinned: (m) => `增强提示词（${m}）` },
-    menu: {
-      custom: '自定义模型', off: '关', on: '开',
-      statusMain: '当前：主模型',
-      statusPick: '开启后，点上方列表选模型'
-    },
+    tip: { idle: '增强提示词', enhancing: '增强中…', retrying: '限流重试中…', revert: '恢复原文' },
     notify: {
       noEditor: '未找到输入框',
       notEditable: '输入框当前不可编辑',
@@ -183,12 +122,7 @@ const LOCALES = {
     }
   },
   'zh-hant': {
-    tip: { idle: '增強提示詞', enhancing: '增強中…', retrying: '限流重試中…', revert: '恢復原文', pinned: (m) => `增強提示詞（${m}）` },
-    menu: {
-      custom: '自訂模型', off: '關', on: '開',
-      statusMain: '目前：主模型',
-      statusPick: '開啟後，點上方列表選模型'
-    },
+    tip: { idle: '增強提示詞', enhancing: '增強中…', retrying: '限流重試中…', revert: '恢復原文' },
     notify: {
       noEditor: '未找到輸入框',
       notEditable: '輸入框目前不可編輯',
@@ -257,13 +191,11 @@ async function runEnhance(btnEl, onPhase, onRetry) {
   // mixed draft is enhanceable: we protect the chip tokens in the template.
   // (Token scan on the TEXT, not the DOM: getDraft already carries them.)
   const CHIP_REF_RE = /@(file|folder|url|image|tool|line|terminal|session):/
-  // Routing (user spec): pin enabled → session_id + explicit provider/model
-  // (the pin wins over the session's model). Pin off / never picked → send the
-  // request BARE (no session_id): llm.oneshot's auto arm then lands on the
-  // configured MAIN model (model.default), not whatever the session happens to
-  // run — the picker is the only thing that steers enhancement.
+  // Routing: the request is sent BARE (no session_id), so llm.oneshot's auto
+  // arm lands on the configured MAIN model (model.default) rather than the
+  // live session's model. A dedicated enhance model is configured host-side
+  // via `auxiliary.prompt_enhancement` in config.yaml.
   const sessionId = resolveSessionId(btnEl, () => host.state.activeSessionId.get())
-  const pin = effectivePin()
   const draftText = await c.getDraft(sessionId)
   const text = draftText ?? ''
   const hasChips = CHIP_REF_RE.test(text)
@@ -295,15 +227,6 @@ async function runEnhance(btnEl, onPhase, onRetry) {
       // and times out on our ~700-char template + long drafts (60s cap).
       // A custom task name gets the standard aux model + its own timeout key.
       task: 'prompt_enhancement'
-    }
-    if (pin) {
-      if (sessionId) req.session_id = sessionId
-      // M2: an enabled ⌘+click pin wins over session/default routing (host
-      // llm.oneshot provider/model passthrough; hosts without it reject this
-      // request with 4000 out-of-sync — enhancement stays usable with the
-      // toggle off, which needs no new host surface).
-      req.provider = pin.provider
-      req.model = pin.model
     }
     // host.request is hard-capped at the gateway default 30s
     // (DEFAULT_GATEWAY_REQUEST_TIMEOUT_MS) — LLM generation routinely exceeds
@@ -432,16 +355,6 @@ function EnhanceButton() {
   const [retrying, setRetrying] = useState(false)
   const phaseRef = useRef(phase)
   phaseRef.current = phase
-  // Model pin (⌘+click picker): global value, this instance's tooltip mirrors
-  // it via the listener set so every composer's button updates together.
-  const metaGesture = useRef(false)
-  const [menuOpen, setMenuOpen] = useState(false)
-  const [pin, setPin] = useState(modelPin)
-  useEffect(() => {
-    const fn = (v) => setPin(v)
-    pinListeners.add(fn)
-    return () => pinListeners.delete(fn)
-  }, [])
   const syncPhase = useCallback((p) => {
     const editor = resolveEditor(btnRef.current)
     if (editor) editorState(editor).phase = p
@@ -482,11 +395,7 @@ function EnhanceButton() {
     return () => mo.disconnect()
   }, [phase])
 
-  const onClick = (e) => {
-    // ⌘+click opens the model picker instead of enhancing (the DropdownMenu
-    // trigger already toggled on pointerdown; the gesture's metaKey was
-    // captured there and gates the onOpenChange below).
-    if (e?.metaKey) return
+  const onClick = () => {
     const editor = resolveEditor(btnRef.current)
     const st = editor ? editorState(editor) : null
     const current = st?.phase ?? phaseRef.current
@@ -499,139 +408,43 @@ function EnhanceButton() {
     } else runEnhance(btnRef.current, syncPhase, syncRetry)
   }
 
-  // The pin that would route an enhance call right now (enabled + complete).
-  const effPin = pin?.enabled && pin.provider && pin.model ? pin : null
-
   const tip = phase === 'enhancing'
     ? (retrying ? t('tip.retrying') : t('tip.enhancing'))
     : phase === 'enhanced' ? t('tip.revert')
-    : effPin ? t('tip.pinned', `${effPin.provider}: ${effPin.model}`) : t('tip.idle')
+    : t('tip.idle')
 
-  // The MENU is not ours: ModelCatalogMenu from the SDK is the same component
-  // the composer's model pill renders (search, provider grouping, effort
-  // submenu) — only the controller differs: our select() holds a detached
-  // per-task pin instead of writing to a live session (kanban model-override
-  // pattern). Effort/fast have no wire path on llm.oneshot, so the submenu is
-  // inert (presetFor {} / setOptions no-op). The check mark follows the
-  // EFFECTIVE pin only — a disabled pin must not look current.
-  const menuController = {
-    applyPreset: () => {},
-    current: { effort: '', fast: false, model: effPin?.model ?? '', provider: effPin?.provider ?? '' },
-    presetFor: () => ({}),
-    // Picking a model is an act of intent: it also flips the toggle on.
-    select: (model, provider) => { setModelPin({ enabled: true, model, provider }) }, // menu closes via ModelMenuCloseContext
-    setOptions: () => {}
-  }
-
-  return jsx(DropdownMenu, {
-    open: menuOpen,
-    // Radix toggles on the trigger's pointerdown and only reports the desired
-    // state here — no event. The gesture's metaKey was recorded capture-phase
-    // (fires before Radix's bubble handler regardless of compose order), so a
-    // plain click's open request is vetoed and only ⌘+click opens the picker.
-    onOpenChange: (next) => {
-      if (!next) return setMenuOpen(false)
-      if (metaGesture.current) setMenuOpen(true)
-    },
-    children: [
-      jsx(DropdownMenuTrigger, {
-        key: 'trigger',
-        asChild: true,
-        children: jsx('span', {
-          onPointerDownCapture: (e) => { metaGesture.current = Boolean(e.metaKey) },
-          onKeyDownCapture: (e) => { metaGesture.current = Boolean(e.metaKey) },
-          style: { display: 'inline-flex' },
-          children: jsx(Tip, {
-            label: tip,
-            children: jsx(Button, {
-              'aria-label': tip,
-              [BTN_ATTR]: '',
-              className: GHOST_ICON_BTN,
-              disabled: false, // spinner is a cancel button while enhancing (WorkBuddy parity)
-              onClick,
-              ref: btnRef,
-              size: 'icon',
-              type: 'button',
-              variant: 'ghost',
-              children: phase === 'enhancing'
-                ? jsx(Spinner, {})
-                : jsx(Codicon, {
-                    // The icon tracks the action available, not the event that
-                    // just happened: once enhanced, the only thing this button
-                    // can still do is go back to the original draft → return
-                    // arrow, not a static done-marker.
-                    name: phase === 'enhanced' ? 'discard' : 'sparkle',
-                    size: '0.875rem'
-                  })
-            })
+  return jsx(Tip, {
+    label: tip,
+    children: jsx(Button, {
+      'aria-label': tip,
+      [BTN_ATTR]: '',
+      className: GHOST_ICON_BTN,
+      disabled: false, // spinner is a cancel button while enhancing (WorkBuddy parity)
+      onClick,
+      ref: btnRef,
+      size: 'icon',
+      type: 'button',
+      variant: 'ghost',
+      children: phase === 'enhancing'
+        ? jsx(Spinner, {})
+        : jsx(Codicon, {
+            // The icon tracks the action available, not the event that just
+            // happened: once enhanced, the only thing this button can still
+            // do is go back to the original draft → return arrow.
+            name: phase === 'enhanced' ? 'discard' : 'sparkle',
+            size: '0.875rem'
           })
-        })
-      }),
-      jsx(DropdownMenuContent, {
-        key: 'menu',
-        align: 'end',
-        side: 'top',
-        sideOffset: 6,
-        className: 'w-72 p-0',
-        children: jsx(ModelMenuCloseContext.Provider, {
-          value: () => setMenuOpen(false),
-          children: jsx(ModelCatalogMenu, {
-            controller: menuController,
-            // Curation rows belong to the composer pill; our surface only
-            // consumes the curated list (host showEditModels patch).
-            showEditModels: false,
-            // The toggle is OURS (rendered in the catalog's footer slot):
-            // off = main model, on = the pinned pick above. Both rows
-            // preventDefault so the menu stays open while toggling.
-            footer: [
-              jsx(DropdownMenuItem, {
-                key: 'toggle',
-                onSelect: (e) => e.preventDefault(),
-                children: [
-                  jsx(Codicon, { key: 'icon', name: 'sparkle', size: '0.75rem' }),
-                  jsx('span', { key: 'label', style: { flex: 1, minWidth: 0 }, children: t('menu.custom') }),
-                  jsx(SegmentedControl, {
-                    key: 'seg',
-                    onChange: (id) => setModelPin({ enabled: id === 'on' }),
-                    options: [
-                      { id: 'off', label: t('menu.off') },
-                      { id: 'on', label: t('menu.on') }
-                    ],
-                    value: pin?.enabled ? 'on' : 'off'
-                  })
-                ]
-              }),
-              jsx(DropdownMenuItem, {
-                key: 'status',
-                disabled: true,
-                onSelect: (e) => e.preventDefault(),
-                children: jsx('span', {
-                  style: {
-                    color: 'var(--ui-text-tertiary)', display: 'block', fontSize: '0.68rem',
-                    minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
-                  },
-                  children: !pin?.enabled
-                    ? t('menu.statusMain')
-                    : (effPin ? `${effPin.provider} · ${effPin.model}` : t('menu.statusPick'))
-                })
-              })
-            ]
-          })
-        })
-      })
-    ]
+    })
   })
 }
 
 export default {
   id: ID,
   name: 'Prompt Enhancer',
-  description: 'A composer ✨ button that rewrites a rough draft into a structured prompt (task / scope / constraints / output shape) and restores the original on a second click. ⌘+click picks a dedicated enhance model (toggleable; off = main model).',
+  description: 'A composer ✨ button that rewrites a rough draft into a structured prompt (task / scope / constraints / output shape) and restores the original on a second click. One stateless gateway call, preserves @file and /command chips, per-session state.',
   register(ctx) {
     const disposeI18n = ctx.i18n.register(LOCALES)
     ti18nStatic = ctx.i18n.t
-    storageApi = ctx.storage
-    modelPin = loadPin()
     injectSpinnerStyle()
 
     ctx.register({
@@ -644,9 +457,7 @@ export default {
       disposeI18n?.()
       removeSpinnerStyle()
       ti18nStatic = null
-      storageApi = null
-      pinListeners.clear()
     })
-    console.error(`[prompt-enhancer] registered (M2+pure-sdk) into ${COMPOSER_AREAS.actions}`)
+    console.error(`[prompt-enhancer] registered (pure-sdk) into ${COMPOSER_AREAS.actions}`)
   }
 }

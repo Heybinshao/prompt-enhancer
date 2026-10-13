@@ -162,74 +162,27 @@ test('R9: chip token 走草稿文本保护，模板含 token 保真约束', () =
 // write-back layer was deleted with the catalog review #121246 — chip
 // hydration is now entirely the official setDraft's job. sdk-only.test.mjs
 // pins the new contract.
-// [M2] ⌘+click 开关浮层：官方列表 + 我们自己的自定义模型开关；编辑模型
-// 入口由宿主 showEditModels: false 隐藏（列表本身已是可见模型列表）。
-test('R11: ⌘+click 浮层齐备（开关 / oneshot 透传 / 存储 / 官方菜单）', () => {
+// [v1.6.1] 自定义模型（M2）已移除。宿主契约 LlmOneshotParams
+// (tui_gateway/contracts/sessions.py) 里没有 provider/model 字段，带上去只会让
+// 开关一开就 4000 out-of-sync —— 目录里不该留着这个功能。本组断言把「已移除」
+// 钉死，防止回退：要恢复得等上游 #118430 合并后再整块加回。
+test('R11: 自定义模型（M2）已移除——无选择器 / 无 provider·model 透传', () => {
   const fs = process.getBuiltinModule('fs')
   const src = fs.readFileSync(new URL('../desktop/plugin.js', import.meta.url), 'utf8')
-  assert.ok(/if \(e\?\.metaKey\) return/.test(src), '⌘+click 分流存在（普通点击不中断增强）')
-  assert.ok(/const pin = effectivePin\(\)/.test(src), '调用前算 effective pin（开+选齐才生效）')
-  assert.ok(!/req\.session_id/.test(src) || /if \(pin\)/.test(src), '裸请求不带 session_id（关=主模型）')
-  assert.ok(/req\.provider = pin\.provider/.test(src) && /req\.model = pin\.model/.test(src),
-    'oneshot 透传 provider/model（宿主 llm.oneshot 透传补丁配套）')
-  assert.ok(/SegmentedControl/.test(src) && /menu\.custom/.test(src) && /menu\.off/.test(src),
-    '浮层里有我们自己的 关/开 开关')
-  assert.ok(/select: \(model, provider\) => \{ setModelPin\(\{ enabled: true,/.test(src),
-    '选模型自动打开开关')
-  assert.ok(/showEditModels: false/.test(src), '编辑模型入口隐藏（列表本身已是可见列表）')
-  assert.ok(/storageApi\?\.set\('enhanceModel'/.test(src), 'pin 走 ctx.storage 持久化（开关状态同存）')
-  assert.ok(/onPointerDownCapture/.test(src) && /metaGesture/.test(src) && /onOpenChange/.test(src),
-    'capture 相位记录 metaKey，onOpenChange 否决普通点击开菜单')
-  assert.ok(/ModelCatalogMenu/.test(src), '用官方模型选择器组件')
-  // menu.follow 已被开关取代，不应残留引用
-  assert.ok(!/menu\.follow/.test(src), '旧「清除固定」项已删除')
+  const banned = [
+    'ModelCatalogMenu', 'ModelMenuCloseContext', 'SegmentedControl', 'DropdownMenu',
+    'setModelPin', 'effectivePin', 'modelPin', 'pinListeners', 'storageApi',
+    'menu.custom', 'tip.pinned', 'metaGesture'
+  ]
+  const hits = banned.filter((b) => src.includes(b))
+  assert.equal(hits.length, 0, 'M2 残留: ' + hits.join(', '))
+  assert.ok(!/req\.provider\s*=/.test(src), '不再向 llm.oneshot 传 provider')
+  assert.ok(!/req\.model\s*=/.test(src), '不再向 llm.oneshot 传 model')
+  assert.ok(!/req\.session_id/.test(src), '请求保持裸发（不向 llm.oneshot 传 session_id）')
 })
 
-// [M2 伴生] pin 开关语义同构镜像：选模型自动开、关保留选择、effective 判定
-test('R12: pin 开关语义（同构镜像）', () => {
-  const store = new Map()
-  const storageApi = {
-    get: (k) => store.get(k),
-    set: (k, v) => store.set(k, v),
-    remove: (k) => store.delete(k)
-  }
-  let modelPin = null
-  const pinListeners = new Set()
-  function loadPin() {
-    const v = storageApi?.get('enhanceModel')
-    if (v && typeof v === 'object') {
-      const provider = typeof v.provider === 'string' ? v.provider : ''
-      const model = typeof v.model === 'string' ? v.model : ''
-      return { enabled: v.enabled !== false, provider, model }
-    }
-    return null
-  }
-  function setModelPin(patch) {
-    modelPin = { enabled: false, provider: '', model: '', ...(modelPin ?? {}), ...patch }
-    storageApi?.set('enhanceModel', modelPin)
-    for (const fn of pinListeners) { fn(modelPin) }
-  }
-  function effectivePin() {
-    return modelPin?.enabled && modelPin.provider && modelPin.model ? modelPin : null
-  }
-  const seen = []
-  pinListeners.add(v => seen.push(v))
-  // 选模型 → 自动开
-  setModelPin({ enabled: true, model: 'deepseek-flash', provider: 'deepseek' })
-  assert.equal(effectivePin().model, 'deepseek-flash', '开+选齐 → 生效')
-  assert.equal(loadPin().enabled, true, '开关状态持久化')
-  // 关 → 不生效但保留选择
-  setModelPin({ enabled: false })
-  assert.equal(effectivePin(), null, '关 → 回主模型')
-  assert.equal(loadPin().model, 'deepseek-flash', '关保留已选模型')
-  assert.equal(seen.length, 2, '两次变更都广播')
-  // 旧格式（无 enabled 字段）迁移为开
-  store.set('enhanceModel', { provider: 'deepseek', model: 'deepseek-flash' })
-  assert.equal(loadPin().enabled, true, '旧格式迁移为开')
-  // 坏数据 → 默认
-  store.set('enhanceModel', { model: 42 })
-  assert.equal(loadPin().provider, '', '坏数据归一化，不崩溃')
-})
+// R12 (v1.6.1 移除): pin 开关语义的纯函数镜像随 M2 一起删除——被镜像的
+// loadPin / setModelPin / effectivePin 已不存在，镜像没有对象可测。
 // ── 汇总 ──
 let fail = 0
 for (const [name, r] of results) {
