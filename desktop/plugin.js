@@ -61,12 +61,19 @@ const SYSTEM_TEMPLATE = `你是一位提示词工程专家，负责改进用户�
 // constraints without the second contaminating the first). Its contract is
 // narrower than enhancement's on purpose — only fix what is demonstrably a
 // typo, leave everything a reader could call "style" alone.
-const REPAIR_TEMPLATE = `你是文本校对员。任务：修正用户输入中的录入错误，不做任何其他改动。
+//
+// The judgement rule is the load-bearing part. Dictation errors are mostly NOT
+// misspellings: the recogniser substitutes a DIFFERENT VALID WORD (绘画 for
+// 会话, 在 for 再). A proofreader told to "fix wrong characters" sees a legal
+// word and leaves it; a proofreader told to ask "does this sentence make sense
+// here" catches it. Measured on a real draft: the word-level rule missed every
+// occurrence, the sentence-level rule fixed all four.
+const REPAIR_TEMPLATE = `你是文本校对员，负责修正语音输入和快速打字造成的错误。用户这段话是发给 AI 助手的指令。
 
 只修这些：
-- 错别字、同音字/近音字混淆（例：把"全休"还原为"全修"）
-- 语音输入造成的口误、漏字、多字、重复词
-- 补全缺失的句读标点
+- 同音词被换成了另一个合法词：词本身没错，但整句在这个语境里讲不通（例：谈上下文额度时出现"绘画"，应还原为"会话"）
+- 明显的错别字、漏字、多字、重复词
+- 语音输入缺失的句读标点
 - 仅当原句读不通时才调整语序
 
 不要做这些：
@@ -75,8 +82,9 @@ const REPAIR_TEMPLATE = `你是文本校对员。任务：修正用户输入中�
 - 不改变原文语言与语气
 
 判定规则：
-- 只有在上下文足以确定正确写法时才改；有疑问一律保留原样
-- 修改后长度应与原文基本一致
+- 判断标准是"这句话在语境里通不通"，不是"这个词本身对不对"
+- 一个合法词如果让整句讲不通、换成同音词才通顺，就改
+- 只是"换个说法更好"不算错，不动
 - 全文无需修改时，原样输出原文
 
 只输出修正后的文本本身，不要解释、不要前缀、不要代码围栏。`
@@ -290,11 +298,23 @@ async function callGatewayWithRetry(gw, req, onRetry) {
 // for. The caller never distinguishes, so a bad repair degrades to the old
 // behaviour instead of failing the click.
 async function runRepair(c, sessionId, text, st, seq, onRetry) {
-  if (text.length > REPAIR_SKIP_CHARS) return null
-  if (CHIP_REF_RE.test(text)) return null
-  if (text.trim().length < 8) return null
+  if (text.length > REPAIR_SKIP_CHARS) {
+    console.error('[prompt-enhancer] repair skip: draft too long', text.length)
+    return null
+  }
+  if (CHIP_REF_RE.test(text)) {
+    console.error('[prompt-enhancer] repair skip: draft carries ref chips')
+    return null
+  }
+  if (text.trim().length < 8) {
+    console.error('[prompt-enhancer] repair skip: draft too short', text.length)
+    return null
+  }
   const gw = host.getGateway()
-  if (!gw) return null
+  if (!gw) {
+    console.error('[prompt-enhancer] repair skip: no gateway')
+    return null
+  }
   let res
   try {
     res = await callGatewayWithRetry(gw, {
@@ -313,12 +333,20 @@ async function runRepair(c, sessionId, text, st, seq, onRetry) {
     return null
   }
   if (seq !== st.seq) return null
-  const repaired = cleanRepair(res?.text)
-  if (!repaired || repaired === text) return null
-  if (!repairDriftOk(text, repaired) || !chipsPreserved(text, repaired)) {
-    console.error('[prompt-enhancer] repair rejected by guardrail (drift/chip) — enhancing the original')
+  const raw = String(res?.text ?? '')
+  const repaired = cleanRepair(raw)
+  if (!repaired || repaired === text) {
+    // The most common "repair did nothing": the model judged the draft clean
+    // (or echoed it). Lengths only — the draft itself never goes to the log.
+    console.error('[prompt-enhancer] repair no-op', JSON.stringify({ inLen: text.length, outLen: repaired.length }))
     return null
   }
+  if (!repairDriftOk(text, repaired) || !chipsPreserved(text, repaired)) {
+    console.error('[prompt-enhancer] repair rejected by guardrail (drift/chip) — enhancing the original',
+      JSON.stringify({ inLen: text.length, outLen: repaired.length }))
+    return null
+  }
+  console.error('[prompt-enhancer] repair applied', JSON.stringify({ inLen: text.length, outLen: repaired.length }))
   return repaired
 }
 

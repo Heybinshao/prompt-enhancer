@@ -1,5 +1,5 @@
 name: prompt-enhancer
-version: 1.7.0
+version: 1.7.1
 requires_hermes: ">=0.21.5"
 description: "A button in the Hermes Desktop composer that first repairs dictation typos in the draft, then rewrites it into a structured prompt (task / scope / constraints / output shape), with one more click to restore the original typing. Two stateless gateway calls (repair → enhance), preserves @file and /command chips, per-session state."
 author: Heybinshao
