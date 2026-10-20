@@ -169,6 +169,7 @@ const LOCALES = {
       noEditor: 'Composer not found',
       notEditable: 'Composer is not editable right now',
       chipBail: 'Draft contains references/path tags — enhance not supported yet',
+      repairChipSkip: 'Draft has reference tags — typo repair skipped',
       tooLong: (n, max) => `Draft too long (${n} > ${max} chars) — enhance not supported`,
       noSession: 'Cannot resolve the owning session — enhance not supported',
       draftChanged: 'Draft changed — enhancement not applied',
@@ -186,6 +187,7 @@ const LOCALES = {
       noEditor: '未找到输入框',
       notEditable: '输入框当前不可编辑',
       chipBail: '草稿含引用/路径标签，暂不支持增强',
+      repairChipSkip: '草稿含引用标签，已跳过修复',
       tooLong: (n, max) => `草稿过长（${n} > ${max} 字符），暂不支持增强`,
       noSession: '无法确定所属会话，暂不支持增强',
       draftChanged: '草稿已变动，本次增强结果未应用',
@@ -203,6 +205,7 @@ const LOCALES = {
       noEditor: '未找到輸入框',
       notEditable: '輸入框目前不可編輯',
       chipBail: '草稿含引用/路徑標籤，暫不支援增強',
+      repairChipSkip: '草稿含引用標籤，已跳過修復',
       tooLong: (n, max) => `草稿過長（${n} > ${max} 字元），暫不支援增強`,
       noSession: '無法確定所屬會話，暫不支援增強',
       draftChanged: '草稿已變動，本次增強結果未套用',
@@ -386,7 +389,7 @@ async function runRepairOnly(btnEl, onPhase, onRetry) {
   // "Nothing happened" needs a reason: the draft changed under us, the draft is
   // chip-only (repair skips those), or there was genuinely nothing to fix.
   if (reason === 'changed') tNotify('info', 'notify.draftChanged')
-  else tNotify('info', CHIP_REF_RE.test(text) ? 'notify.chipBail' : 'notify.repairNoChange')
+  else tNotify('info', CHIP_REF_RE.test(text) ? 'notify.repairChipSkip' : 'notify.repairNoChange')
 }
 
 async function runEnhance(btnEl, onPhase, onRetry) {
