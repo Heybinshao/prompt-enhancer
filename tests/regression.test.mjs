@@ -114,16 +114,29 @@ test('R6: 不同 editor 的初始态互不共享', () => {
   assert.equal(stateByEditor.size, 2)
 })
 
-// [模板 v1.0.8] 语音错字修正指令存在且含示例锚点
-test('R7: SYSTEM_TEMPLATE 含语音纠错原则与全休→全修示例', () => {
-  // 用例读磁盘 plugin.js，防模板被改丢
+// [模板 v1.7.0] 修复指令已从增强模板拆出，独立成 REPAIR_TEMPLATE
+// （v1.0.8 起它写在 SYSTEM_TEMPLATE 里，等于「增强时顺手修」；v1.7.0 改为
+// 前置独立一步，所以断言必须跟着搬家，否则会钉死一个已废弃的形态）
+test('R7: REPAIR_TEMPLATE 含语音纠错原则与全休→全修示例', () => {
+  const fs = await_import_fs()
+  const src = fs.readFileSync(new URL('../desktop/plugin.js', import.meta.url), 'utf8')
+  const m = src.match(/const REPAIR_TEMPLATE = `(.*?)`/s)
+  assert.ok(m, 'REPAIR_TEMPLATE 存在')
+  assert.ok(/语音输入/.test(m[1]), '含语音输入纠错')
+  assert.ok(/全休/.test(m[1]) && /全修/.test(m[1]), '含同音字示例锚点')
+  assert.ok(/无法确定|有疑问一律保留原样/.test(m[1]), '含过度改写护栏')
+  assert.ok(/不改写风格/.test(m[1]), '含「不改风格」边界')
+})
+
+// [v1.7.0] 修复不再写在增强模板里——两边都写 = 同一处被修两遍，
+// 第二遍在「重写」心态下跑，会破坏前置修复的保真度
+test('R7b: SYSTEM_TEMPLATE 不再含修复指令（防重复修复）', () => {
   const fs = await_import_fs()
   const src = fs.readFileSync(new URL('../desktop/plugin.js', import.meta.url), 'utf8')
   const m = src.match(/const SYSTEM_TEMPLATE = `(.*?)`/s)
   assert.ok(m, 'SYSTEM_TEMPLATE 存在')
-  assert.ok(/语音输入/.test(m[1]), '含语音输入纠错')
-  assert.ok(/全休/.test(m[1]) && /全修/.test(m[1]), '含同音字示例锚点')
-  assert.ok(/无法确定是否错误时保持原样/.test(m[1]), '含过度改写护栏')
+  assert.ok(!/语音输入/.test(m[1]), '增强模板里不该再有语音纠错指令')
+  assert.ok(!/全休/.test(m[1]), '增强模板里不该再有同音字示例')
 })
 
 // [取消语义] WorkBuddy parity：转圈可点=取消，取消后迟到大结果丢弃
@@ -183,6 +196,82 @@ test('R11: 自定义模型（M2）已移除——无选择器 / 无 provider·mo
 
 // R12 (v1.6.1 移除): pin 开关语义的纯函数镜像随 M2 一起删除——被镜像的
 // loadPin / setModelPin / effectivePin 已不存在，镜像没有对象可测。
+// ── v1.7.0 修复前置步骤：护栏纯函数镜像 ──
+// 与 plugin.js 的 repairDriftOk / chipsPreserved / cleanRepair 保持同步。
+const REPAIR_MAX_DRIFT_RATIO = 0.15
+function repairDriftOk(original, repaired) {
+  const before = String(original).length
+  const drift = Math.abs(String(repaired).length - before)
+  return drift <= Math.max(8, Math.ceil(before * REPAIR_MAX_DRIFT_RATIO))
+}
+const CHIP_TOKEN_RE = /@(?:file|folder|url|image|tool|line|terminal|session):[^\s，。；、）)】」』]+/g
+function chipsPreserved(original, repaired) {
+  const tokens = String(original).match(CHIP_TOKEN_RE) || []
+  if (!tokens.length) return true
+  const out = String(repaired)
+  return tokens.every((token) => out.includes(token))
+}
+function cleanRepair(text) {
+  const stripped = String(text).trim().replace(/^["'“”‘’「」『』]|["'“”‘’「」『』]$/g, '')
+  return stripped.replace(/^(?:修复后|修正后|校对后|已修复|修正版本)[:：]\s*/, '').trim()
+}
+
+test('R13: 长度护栏——同音字替换/补标点放行，扩写拒绝', () => {
+  const orig = '帮我把这个方案整理一下发出去吧'
+  // 等长同音字修正
+  assert.equal(repairDriftOk(orig, '帮我把这个方案整理一下发出去吧'), true, '等长必须放行')
+  assert.equal(repairDriftOk(orig, '帮我把这个方按整理一下发出去吧'), true, '同音字等长替换放行')
+  // 补标点：+3
+  assert.equal(repairDriftOk(orig, '帮我把这个方案整理一下，发出去吧。'), true, '补标点放行')
+  // 扩写：40 字 → 90 字，预算 8
+  const expanded = orig + '，另外请注意格式要规范、语气要正式、结构要清晰、不要遗漏任何关键信息、最好分点说明'
+  assert.equal(repairDriftOk(orig, expanded), false, '扩写必须拒绝')
+  // 长文本按 15% 放宽
+  const long = '甲'.repeat(200)
+  assert.equal(repairDriftOk(long, '甲'.repeat(230)), true, '200 字 +30 在 15% 预算内')
+  assert.equal(repairDriftOk(long, '甲'.repeat(260)), false, '200 字 +60 超预算')
+})
+
+test('R14: chip token 护栏——丢失即拒绝', () => {
+  const orig = '看看 @file:src/app.tsx 这个组件的样式'
+  assert.equal(chipsPreserved(orig, '看看 @file:src/app.tsx 这个组件的样式。'), true, 'token 保留放行')
+  assert.equal(chipsPreserved(orig, '看看 src/app.tsx 这个组件的样式'), false, 'token 被吃掉必须拒绝')
+  assert.equal(chipsPreserved(orig, '看看 @file:src/app.ts 这个组件的样式'), false, 'token 被改写必须拒绝')
+  assert.equal(chipsPreserved('没有引用标记的一句话', '没有引用标记的一句话'), true, '无 token 直接放行')
+})
+
+test('R15: cleanRepair 剥掉模型加的前缀与引号', () => {
+  assert.equal(cleanRepair('修复后：帮我把方案整理一下'), '帮我把方案整理一下')
+  assert.equal(cleanRepair('“帮我把方案整理一下”'), '帮我把方案整理一下')
+  assert.equal(cleanRepair('  帮我把方案整理一下  '), '帮我把方案整理一下')
+  assert.equal(cleanRepair('修正版本: 帮我把方案整理一下'), '帮我把方案整理一下')
+})
+
+// [v1.7.0] 回退只有一层：backup 记的是用户原文，且增强写回不得覆盖它
+test('R16: 回退单层——backup 只赋一次、revert 后清空', () => {
+  const fs = await_import_fs()
+  const src = fs.readFileSync(new URL('../desktop/plugin.js', import.meta.url), 'utf8')
+  assert.ok(/if \(!st\.backup\) st\.backup = snapshot/.test(src), '增强写回不得无条件覆盖 backup')
+  const revertBody = src.slice(src.indexOf('async function revert('))
+  assert.ok(/st\.backup = ''/.test(revertBody.slice(0, 1200)), 'revert 后必须清空 backup（否则下次误判可回退）')
+  assert.ok(!/st\.backup = (?:st\.lastApplied|repaired)/.test(src), 'backup 不得被写成修复稿/增强稿')
+})
+
+// [v1.7.0] ⌥ 点击 = 仅修复：入口必须存在，且这条路径绝不能调到增强
+test('R17: ⌥ 点击只修复——有独立入口、不触发增强调用', () => {
+  const fs = await_import_fs()
+  const src = fs.readFileSync(new URL('../desktop/plugin.js', import.meta.url), 'utf8')
+  assert.ok(/e\?\.altKey\) runRepairOnly\(/.test(src), 'onClick 缺 altKey 分支')
+  assert.ok(/async function runRepairOnly\(/.test(src), '缺 runRepairOnly 入口')
+  // 取出 runRepairOnly 函数体（到下一个顶层 async function 为止）
+  const start = src.indexOf('async function runRepairOnly(')
+  const next = src.indexOf('\nasync function ', start + 10)
+  const body = src.slice(start, next === -1 ? undefined : next)
+  assert.ok(!/prompt_enhancement/.test(body), '仅修复路径不得调用增强任务')
+  assert.ok(!/SYSTEM_TEMPLATE/.test(body), '仅修复路径不得使用增强模板')
+  assert.ok(/repairAndApply\(/.test(body), '仅修复路径必须复用同一套修复写回（含快照守卫）')
+})
+
 // ── 汇总 ──
 let fail = 0
 for (const [name, r] of results) {
