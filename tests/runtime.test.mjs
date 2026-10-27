@@ -70,13 +70,12 @@ export const Fragment = 'Fragment'
 
 const EXPORTS = `
 export const __test = {
-  normalizePin, loadPin, setDefaultPin, setOncePin, effectivePin, consumeOnce,
+  normalizePin, loadPin, setPinnedModel, effectivePin,
   pinComplete, snapshotPin, isContractReject, callGatewayWithRetry, cleanRepair,
   stripWrappingQuotes, looksTruncated, outputCapFor, maxTokensFor, profileScope,
   repairDriftOk, chipsPreserved, REPAIR_PREFIX_RE,
   setStorage: (s) => { storageApi = s },
-  getDefaultPin: () => defaultPin,
-  getOncePin: () => oncePin,
+  getPinned: () => pinnedModel,
   setHostRejectsPin: (v) => { hostRejectsPin = v },
   setHostRejectsProfile: (v) => { hostRejectsProfile = v }
 }
@@ -116,42 +115,30 @@ test('T1: 旧裸记录 {provider,model} 视为启用，半条记录丢弃', () =
   assert.equal(T.normalizePin({ enabled: false, provider: 'p', model: 'm' }).enabled, false)
 })
 
-test('T2: 默认值整条落盘，关掉后仍保留 provider/model（供再开）', () => {
+test('T2: 固定值整条落盘，取消固定后清空记录', () => {
   const storage = fakeStorage()
   T.setStorage(storage)
-  T.setDefaultPin({ enabled: true, provider: 'magpie', model: 'm1' })
-  assert.deepEqual(storage.data['enhanceModel'] && JSON.parse(storage.data['enhanceModel']),
-    { enabled: true, provider: 'magpie', model: 'm1' })
-  T.setDefaultPin({ enabled: false })
-  const saved = JSON.parse(storage.data['enhanceModel'])
-  assert.equal(saved.enabled, false)
-  assert.equal(saved.provider, 'magpie', '关掉默认不得丢模型（否则再开要重选）')
-  assert.equal(saved.model, 'm1')
+  T.setPinnedModel({ enabled: true, provider: 'magpie', model: 'm1' })
+  assert.deepEqual(JSON.parse(storage.data['enhanceModel']), { enabled: true, provider: 'magpie', model: 'm1' })
+  T.setPinnedModel({ enabled: false, provider: '', model: '' })
+  assert.deepEqual(JSON.parse(storage.data['enhanceModel']), { enabled: false, provider: '', model: '' })
 })
 
-test('T3: 优先级 本次 > 默认；本次按会话生效，别的会话落到默认', () => {
+test('T3: 固定即生效；未固定回主模型（没有「本次」这一档）', () => {
   const storage = fakeStorage()
   T.setStorage(storage)
-  T.setDefaultPin({ enabled: true, provider: 'p0', model: 'm0' })
-  T.setOncePin({ provider: 'p1', model: 'm1', sessionId: 'S1' })
-  assert.deepEqual(T.effectivePin('S1'), { provider: 'p1', model: 'm1', sessionId: 'S1' })
-  assert.deepEqual(T.effectivePin('S2'), { provider: 'p0', model: 'm0' }, '换会话不得沿用本次')
-  assert.deepEqual(T.effectivePin(), { provider: 'p1', model: 'm1', sessionId: 'S1' }, '无会话上下文时用于展示')
+  T.setPinnedModel({ enabled: false, provider: '', model: '' })
+  assert.equal(T.effectivePin(), null, '未固定 → 主模型')
+  T.setPinnedModel({ enabled: true, provider: 'p1', model: 'm1' })
+  assert.deepEqual(T.effectivePin(), { provider: 'p1', model: 'm1' })
+  assert.equal(T.getPinned().model, 'm1', '记录应保留以跨会话/跨重启复用')
 })
 
-test('T4: 降级标记一置，任何 pin 都不再生效', () => {
-  T.setOncePin({ provider: 'p1', model: 'm1', sessionId: null })
+test('T4: 降级标记一置，固定值也不再生效', () => {
+  T.setPinnedModel({ enabled: true, provider: 'p1', model: 'm1' })
   T.setHostRejectsPin(true)
-  assert.equal(T.effectivePin('S1'), null)
+  assert.equal(T.effectivePin(), null)
   T.setHostRejectsPin(false)
-})
-
-test('T5: 消费一次即清，且不会误清别的模型', () => {
-  T.setOncePin({ provider: 'p1', model: 'm1' })
-  T.consumeOnce({ provider: 'p9', model: 'm9' })
-  assert.ok(T.getOncePin(), '不匹配的消费不得清掉')
-  T.consumeOnce({ provider: 'p1', model: 'm1' })
-  assert.equal(T.getOncePin(), null)
 })
 
 // ── 请求侧 ───────────────────────────────────────────────────────────────
@@ -187,7 +174,7 @@ test('T8: 宿主契约拒收 → 剥掉 pin 重发裸请求，并记住本次运
   assert.equal(calls[1].model, undefined)
   assert.equal(calls[1].session_id, undefined, '降级请求必须连 session_id 一起去掉')
   assert.equal(T.snapshotPin().unsupported, true)
-  assert.equal(T.effectivePin('S1'), null, '降级后不得再宣称在用 pin')
+  assert.equal(T.effectivePin(), null, '降级后不得再宣称在用 pin')
 })
 
 await testAsync('T9: 取消后不再重试（isCancelled 生效）', async () => {

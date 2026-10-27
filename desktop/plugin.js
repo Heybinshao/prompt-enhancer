@@ -26,8 +26,7 @@
  */
 import {
   COMPOSER_AREAS, Button, Codicon, DropdownMenu, DropdownMenuContent, DropdownMenuItem,
-  DropdownMenuTrigger, ModelCatalogMenu, ModelMenuCloseContext, SegmentedControl, Tip, host,
-  usePluginI18n
+  DropdownMenuTrigger, ModelCatalogMenu, ModelMenuCloseContext, Tip, host, usePluginI18n
 } from '@hermes/plugin-sdk'
 import { jsx } from 'react/jsx-runtime'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
@@ -192,11 +191,7 @@ const LOCALES = {
   en: {
     tip: { idle: 'Enhance prompt', repairing: 'Fixing typos…', enhancing: 'Enhancing…', retrying: 'Rate limited — retrying…', repaired: 'Input fixed — click to revert', revert: 'Revert to original' },
     menu: {
-      default: 'Use by default',
-      off: 'Off',
-      on: 'On',
       statusMain: 'Using the main model',
-      statusOnce: (m) => `This run: ${m}`,
       statusDefault: (m) => `Pinned: ${m}`,
       statusUnsupported: "This Hermes build can't switch models — the main model is used",
       hostNote: "Switching models needs a newer Hermes; until then the main model is used",
@@ -216,18 +211,13 @@ const LOCALES = {
       repairNoChange: 'No typos found — nothing to fix',
       empty: 'Enhancement came back empty',
       pinUnsupported: "This Hermes build can't switch models yet — the main model was used",
-      pickFirst: 'Pick a model first, then turn 「Always use」 on',
       failed: (m) => `Enhance failed: ${m}`
     }
   },
   zh: {
     tip: { idle: '增强提示词', repairing: '修复输入中…', enhancing: '增强中…', retrying: '限流重试中…', repaired: '已修复输入 · 恢复原文', revert: '恢复原文' },
     menu: {
-      default: '之后都用这个模型',
-      off: '关',
-      on: '开',
       statusMain: '用主模型（未固定）',
-      statusOnce: (m) => `本次：${m}`,
       statusDefault: (m) => `固定：${m}`,
       statusUnsupported: '这一版 Hermes 还不能换模型，已用主模型',
       hostNote: '换模型要等 Hermes 更新；在那之前用主模型',
@@ -247,18 +237,13 @@ const LOCALES = {
       repairNoChange: '未发现需要修复的内容',
       empty: '增强结果为空',
       pinUnsupported: '这一版 Hermes 还不能换模型，本次用的主模型',
-      pickFirst: '先选一个模型，再打开「之后都用」',
       failed: (m) => `增强失败：${m}`
     }
   },
   'zh-hant': {
     tip: { idle: '增強提示詞', repairing: '修復輸入中…', enhancing: '增強中…', retrying: '限流重試中…', repaired: '已修復輸入 · 恢復原文', revert: '恢復原文' },
     menu: {
-      default: '之後都用這個模型',
-      off: '關',
-      on: '開',
       statusMain: '用主模型（未固定）',
-      statusOnce: (m) => `本次：${m}`,
       statusDefault: (m) => `固定：${m}`,
       statusUnsupported: '這一版 Hermes 還不能換模型，已用主模型',
       hostNote: '換模型要等 Hermes 更新；在那之前用主模型',
@@ -278,7 +263,6 @@ const LOCALES = {
       repairNoChange: '未發現需要修復的內容',
       empty: '增強結果為空',
       pinUnsupported: '這一版 Hermes 還不能換模型，本次用的主模型',
-      pickFirst: '先選一個模型，再打開「之後都用」',
       failed: (m) => `增強失敗：${m}`
     }
   }
@@ -308,8 +292,7 @@ function tNotify(kind, key, ...args) {
 // run, and says so. Degradation instead of a hard error is what keeps this
 // shippable: on an old host the picker is inert, never broken.
 let storageApi = null
-let defaultPin = { enabled: false, provider: '', model: '' }
-let oncePin = null
+let pinnedModel = { enabled: false, provider: '', model: '' }
 let hostRejectsPin = false
 let hostRejectsProfile = false
 const pinListeners = new Set()
@@ -325,7 +308,7 @@ function normalizePin(v) {
 
 function loadPin() {
   try { return normalizePin(storageApi?.get(PIN_KEY, null)) ?? { enabled: false, provider: '', model: '' } }
-  catch { return { enabled: false, provider: '', model: '' } } // corrupted record → aux routing
+  catch { return { enabled: false, provider: '', model: '' } } // corrupted record → main model
 }
 
 function pinComplete(pin) {
@@ -333,7 +316,7 @@ function pinComplete(pin) {
 }
 
 function snapshotPin() {
-  return { once: oncePin, def: defaultPin, unsupported: hostRejectsPin }
+  return { pinned: pinnedModel, unsupported: hostRejectsPin }
 }
 
 function emitPin() {
@@ -341,35 +324,21 @@ function emitPin() {
   for (const fn of pinListeners) { try { fn(snap) } catch { /* one bad listener must not break the rest */ } }
 }
 
-// The record is always written whole (never removed), so an OFF default still
-// survives a reload instead of silently coming back on.
-function setDefaultPin(patch) {
-  defaultPin = { enabled: false, provider: '', model: '', ...defaultPin, ...patch }
-  try { storageApi?.set(PIN_KEY, defaultPin) } catch { /* best-effort */ }
+// One record, always whole. Picking in the menu IS the decision: there is no
+// "this run" scope to reconcile, so the menu never has to explain a second
+// dimension — either a model is pinned or the button follows the main model.
+function setPinnedModel(patch) {
+  pinnedModel = { enabled: false, provider: '', model: '', ...pinnedModel, ...patch }
+  try { storageApi?.set(PIN_KEY, pinnedModel) } catch { /* best-effort */ }
   emitPin()
 }
 
-function setOncePin(pin) {
-  oncePin = pin ? { provider: pin.provider, model: pin.model, sessionId: pin.sessionId ?? null } : null
-  emitPin()
-}
-
-function effectivePin(sessionId) {
+// The model this button will actually ask for: the pinned one, else nothing
+// (which leaves both requests bare → the main model). A host that rejects the
+// pin parks this at null so the UI can't promise a route the call can't take.
+function effectivePin() {
   if (hostRejectsPin) return null
-  // A run-scoped pick belongs to the composer it was made in: carrying it into
-  // another session would silently run that session's enhancement on it.
-  if (oncePin && (!oncePin.sessionId || !sessionId || oncePin.sessionId === sessionId)) return oncePin
-  return pinComplete(defaultPin) ? { provider: defaultPin.provider, model: defaultPin.model } : null
-}
-
-// A run that came back with text has spent the pick; the next one starts from
-// the default again. A failed run keeps it, so "click again" retries the same
-// model instead of silently dropping to the aux route.
-function consumeOnce(pin) {
-  if (!oncePin || !pin) return
-  if (oncePin.provider !== pin.provider || oncePin.model !== pin.model) return
-  oncePin = null
-  emitPin()
+  return pinComplete(pinnedModel) ? { provider: pinnedModel.provider, model: pinnedModel.model } : null
 }
 
 function pinLabel(pin) {
@@ -516,7 +485,7 @@ async function runRepair(c, sessionId, text, st, seq, onRetry) {
     // ONE model for the whole button: the repair step carries the same pick as
     // the enhancement. Two steps, one choice — otherwise the user has to hold
     // "this setting only affects half of what the button does" in their head.
-    const pin = effectivePin(sessionId)
+    const pin = effectivePin()
     const req = {
       instructions: REPAIR_TEMPLATE,
       input: text,
@@ -640,7 +609,7 @@ async function runEnhance(btnEl, onPhase, onRetry) {
   // provider/model — the resolver's highest-priority arm — plus the session id
   // so the call stays inside this session's profile scope.
   const sessionId = resolveSessionId(btnEl, () => host.state.activeSessionId.get())
-  const pin = effectivePin(sessionId)
+  const pin = effectivePin()
   const draftText = await c.getDraft(sessionId)
   const text = draftText ?? ''
   if (!text.trim()) {
@@ -746,9 +715,6 @@ async function runEnhance(btnEl, onPhase, onRetry) {
     // like instead of tripping on that normalization.
     const painted = await c.getDraft(sessionId)
     if (typeof painted === 'string') st.lastApplied = painted
-    // The pick did its job: a one-run choice is spent here and the next click
-    // starts from the saved default again.
-    consumeOnce(pin)
     st.phase = 'enhanced'
     onPhase('enhanced')
     if (looksTruncated(cleaned)) {
@@ -847,7 +813,7 @@ function EnhanceButton() {
   // Which session/profile the OPEN menu belongs to: the catalog is per profile,
   // and the default 'default' made a secondary profile's picker list the wrong
   // models. Captured at open time, when btnRef already points at this composer.
-  const [menuTarget, setMenuTarget] = useState({ sessionId: null, profile: null, gateway: null })
+  const [menuTarget, setMenuTarget] = useState({ profile: null, gateway: null })
   const metaGesture = useRef(false)
   // Picking a model must NOT dismiss the menu: the scope switch (this run vs
   // default) sits right below the list and is often the second half of the same
@@ -952,29 +918,20 @@ function EnhanceButton() {
     applyPreset: () => {},
     current: { effort: '', fast: false, model: activePin?.model ?? '', provider: activePin?.provider ?? '' },
     presetFor: () => ({}),
-    // One record at a time, so the status line can never lie: with the default
-    // switch ON a pick IS the new default; with it OFF the pick is this run's
-    // only. The old "pick then promote" two-step left both records alive and
-    // the footer kept reporting 本次 after the user had switched to 默认.
+    // Picking IS the decision: the choice is stored and stays. No "this run"
+    // scope, so there is no second dimension to explain in the menu.
     select: (model, provider) => {
-      suppressClose.current = true // keep the list open for the scope switch below
-      if (pinComplete(pin.def)) {
-        setOncePin(null)
-        setDefaultPin({ enabled: true, provider, model })
-      } else {
-        setOncePin({ provider, model, sessionId: menuTarget.sessionId })
-      }
+      suppressClose.current = true // stay open: the user may reconsider or unpin
+      setPinnedModel({ enabled: true, provider, model })
     },
     setOptions: () => {}
   }
 
   const statusLine = pin.unsupported
     ? t('menu.statusUnsupported')
-    : pinComplete(pin.def)
-      ? t('menu.statusDefault', pinLabel(pin.def))
-      : pin.once
-        ? t('menu.statusOnce', pinLabel(pin.once))
-        : t('menu.statusMain')
+    : pinComplete(pin.pinned)
+      ? t('menu.statusDefault', pinLabel(pin.pinned))
+      : t('menu.statusMain')
 
   return jsx(DropdownMenu, {
     open: menuOpen,
@@ -986,13 +943,7 @@ function EnhanceButton() {
       if (!next) return setMenuOpen(false)
       if (metaGesture.current) {
         suppressClose.current = false
-        const sid = resolveSessionId(btnRef.current, () => host.state.activeSessionId.get())
-        // A run-pick made in another composer is not this composer's pick — but
-        // only drop it when we KNOW which session this is: a fresh draft has no
-        // id, and clearing on "unknown" threw away a pick the user still meant.
-        if (oncePin && oncePin.sessionId && sid && oncePin.sessionId !== sid) setOncePin(null)
         setMenuTarget({
-          sessionId: sid,
           profile: host.state.focusedSessionProfile.get() || null,
           gateway: host.getGateway() ?? null
         })
@@ -1068,38 +1019,6 @@ function EnhanceButton() {
             // picking a model is meant to dismiss it.
             footer: [
               jsx(DropdownMenuItem, {
-                key: 'default',
-                onSelect: (e) => e.preventDefault(),
-                children: [
-                  jsx(Codicon, { key: 'icon', name: 'sparkle', size: '0.75rem' }),
-                  jsx('span', { key: 'label', style: { flex: 1, minWidth: 0 }, children: t('menu.default') }),
-                  jsx(SegmentedControl, {
-                    key: 'seg',
-                    onChange: (id) => {
-                      if (id === 'off') return setDefaultPin({ enabled: false })
-                      // Re-enabling must reuse what's stored: turning the switch
-                      // off keeps provider/model on purpose, so demanding a fresh
-                      // pick here made the user redo work they already did.
-                      const pick = pin.once
-                        ?? (pin.def.provider && pin.def.model ? { provider: pin.def.provider, model: pin.def.model } : null)
-                      // Switching the default on with nothing picked would
-                      // promise a route that doesn't exist → ask for the pick.
-                      if (!pick) return tNotify('info', 'notify.pickFirst')
-                      setDefaultPin({ enabled: true, provider: pick.provider, model: pick.model })
-                      // A promoted run-pick has done its job: leaving both alive
-                      // is what made the status row still say 本次 right after
-                      // the user turned the default on.
-                      if (pin.once) setOncePin(null)
-                    },
-                    options: [
-                      { id: 'off', label: t('menu.off') },
-                      { id: 'on', label: t('menu.on') }
-                    ],
-                    value: pinComplete(pin.def) ? 'on' : 'off'
-                  })
-                ]
-              }),
-              jsx(DropdownMenuItem, {
                 key: 'status',
                 disabled: true,
                 onSelect: (e) => e.preventDefault(),
@@ -1127,16 +1046,11 @@ function EnhanceButton() {
                   children: t('menu.hostNote')
                 })
               }),
-              (pin.once || pinComplete(pin.def)) ? jsx(DropdownMenuItem, {
+              pinComplete(pin.pinned) ? jsx(DropdownMenuItem, {
                 key: 'reset',
-                // One action, one meaning: drop BOTH records so the next run goes
-                // back to the default route. Two separate "clear" controls (one
-                // for this run, one for the default) would make the user guess
-                // which one restores the default.
                 onSelect: (e) => {
                   e.preventDefault()
-                  setOncePin(null)
-                  setDefaultPin({ enabled: false, provider: '', model: '' })
+                  setPinnedModel({ enabled: false, provider: '', model: '' })
                 },
                 children: [
                   jsx(Codicon, { key: 'icon', name: 'close', size: '0.75rem' }),
@@ -1154,17 +1068,15 @@ function EnhanceButton() {
 export default {
   id: ID,
   name: 'Prompt Enhancer',
-  description: 'A composer ✨ button that fixes dictation typos in the draft, then rewrites it into a structured prompt (task / scope / constraints / output shape); one click back restores the original typing. ⌘-click picks the enhancement model for one run or as the default. Two stateless gateway calls (repair → enhance), preserves @file and /command chips, per-session state.',
+  description: 'A composer ✨ button that fixes dictation typos in the draft, then rewrites it into a structured prompt (task / scope / constraints / output shape); one click back restores the original typing. ⌘-click pins the model both steps use. Two stateless gateway calls (repair → enhance), preserves @file and /command chips, per-session state.',
   register(ctx) {
     const disposeI18n = ctx.i18n.register(LOCALES)
     ti18nStatic = ctx.i18n.t
-    // The saved pin lives in plugin-scoped storage (localStorage key
+    // The pinned model lives in plugin-scoped storage (localStorage key
     // `hermes.plugin.prompt-enhancer.enhanceModel`): it survives plugin reloads
-    // and app updates. A "this run" pick stays in memory and dies with the
-    // module — that asymmetry is the feature, not an oversight.
+    // and app updates, because it is a setting, not a run-scoped pick.
     storageApi = ctx.storage ?? null
-    defaultPin = loadPin()
-    oncePin = null
+    pinnedModel = loadPin()
     hostRejectsPin = false // re-probe the host every load: an update may add the door
     hostRejectsProfile = false
     // Two windows share one localStorage but not one module: mirror the other

@@ -185,8 +185,8 @@ test('R11: 模型 pin 存在，透传被 if(pin) 包住（未选模型时请求�
   const fs = process.getBuiltinModule('fs')
   const src = fs.readFileSync(new URL('../desktop/plugin.js', import.meta.url), 'utf8')
   const need = [
-    'ModelCatalogMenu', 'ModelMenuCloseContext', 'SegmentedControl', 'metaGesture',
-    'setOncePin', 'setDefaultPin', 'effectivePin', 'enhanceModel'
+    'ModelCatalogMenu', 'ModelMenuCloseContext', 'metaGesture',
+    'setPinnedModel', 'effectivePin', 'enhanceModel'
   ]
   const missing = need.filter((n) => !src.includes(n))
   assert.equal(missing.length, 0, '缺 pin 组件: ' + missing.join(', '))
@@ -210,16 +210,15 @@ test('R11b: 宿主契约没有 provider/model 时降级为裸请求（不把点�
   assert.ok(/tNotify\('info', 'notify\.pinUnsupported'\)/.test(src), '降级要给用户一句解释')
 })
 
-test('R11d: 一条「恢复默认」清掉本次+默认（不并列两个清除入口）', () => {
+test('R11d: 一条「取消固定」清掉记录（只有一个清除入口）', () => {
   const fs = process.getBuiltinModule('fs')
   const src = fs.readFileSync(new URL('../desktop/plugin.js', import.meta.url), 'utf8')
   const at = src.indexOf("key: 'reset'")
-  assert.ok(at > 0, '缺「恢复默认」菜单项')
-  const body = src.slice(at, at + 600)
-  assert.ok(/setOncePin\(null\)/.test(body), '恢复默认必须清本次')
-  assert.ok(/setDefaultPin\(\{ enabled: false/.test(body), '恢复默认必须关默认')
-  assert.ok(/pin\.once \|\| pinComplete\(pin\.def\)/.test(src), '恢复默认只在有记录时出现')
-  assert.ok(!src.includes('clearOnce'), '旧的「清除本次选择」入口必须移除（避免两个清除控件）')
+  assert.ok(at > 0, '缺「取消固定」菜单项')
+  const body = src.slice(at, at + 500)
+  assert.ok(/setPinnedModel\(\{ enabled: false/.test(body), '取消固定必须清掉记录')
+  assert.ok(/pinComplete\(pin\.pinned\) \? jsx/.test(src), '取消固定只在已固定时出现')
+  assert.ok(!src.includes('clearOnce'), '不得再有并列的清除入口')
 })
 
 test('R21: 菜单预告宿主依赖 + 按钮 a11y + draft 不清本次', () => {
@@ -232,9 +231,6 @@ test('R21: 菜单预告宿主依赖 + 按钮 a11y + draft 不清本次', () => {
   // Radix 把 aria-* 挂在外层 span，按钮本体要自己声明
   assert.ok(/'aria-haspopup': 'menu'/.test(src), '按钮缺 aria-haspopup')
   assert.ok(/'aria-expanded': menuOpen/.test(src), '按钮缺 aria-expanded')
-  // 无会话（新草稿）时不得清掉别处的本次选择
-  assert.ok(/oncePin\.sessionId !== sid\) setOncePin\(null\)/.test(src) && /oncePin\.sessionId && sid &&/.test(src),
-    'draft 场景仍会误清本次')
 })
 
 test('R20: 多 profile 接线——菜单按会话 profile 拉、裸请求带 profile、本次 pin 绑会话', () => {
@@ -248,29 +244,26 @@ test('R20: 多 profile 接线——菜单按会话 profile 拉、裸请求带 pr
   const profileAssigns = (src.match(/Object\.assign\(req, profileScope\(/g) || []).length
   assert.ok(profileAssigns >= 2, '增强与修复的裸请求都应带 profile，实际 ' + profileAssigns)
   assert.ok(/profileScope\(host\.state\.focusedSessionProfile\.get\(\)\)/.test(src), '未读会话所属 profile')
-  // 本次 pin 绑会话
-  assert.ok(/setOncePin\(\{ provider, model, sessionId: menuTarget\.sessionId \}\)/.test(src), '本次 pin 未绑定会话')
   // 跨窗口同步
   assert.ok(/addEventListener\?\.\(window, 'storage'/.test(src), '缺 storage 跨窗口同步')
   // 取消要传 isCancelled
   assert.ok(/onRetry, \(\) => seq !== st\.seq\)/.test(src), '重试未接取消信号')
 })
 
-test('R11e: 选模型不关菜单；默认开时选模型即改默认；状态行默认优先', () => {
+test('R11e: 选模型即固定（菜单不关），状态行只有固定/未固定两态', () => {
   const fs = process.getBuiltinModule('fs')
   const src = fs.readFileSync(new URL('../desktop/plugin.js', import.meta.url), 'utf8')
   assert.ok(/suppressClose/.test(src), '缺 keep-open 标记')
   assert.ok(/if \(suppressClose\.current\) \{/.test(src), '缺「吞掉选择后的关闭」分支')
   const at = src.indexOf('select: (model, provider) => {')
   assert.ok(at > 0, '缺 controller.select')
-  const body = src.slice(at, at + 700)
-  assert.ok(/pinComplete\(pin\.def\)/.test(body), '默认开时选模型必须走改默认分支')
-  assert.ok(/setDefaultPin\(\{ enabled: true, provider, model \}\)/.test(body), '默认开时选模型应直接改默认')
-  assert.ok(/setOncePin\(null\)/.test(body), '改默认时必须清掉本次（单记录）')
-  assert.ok(/if \(pin\.once\) setOncePin\(null\)/.test(src), '把本次提升为默认后必须清本次')
-  const s = src.indexOf('const statusLine =')
-  const sb = src.slice(s, s + 400)
-  assert.ok(sb.indexOf('pinComplete(pin.def)') < sb.indexOf('pin.once'), '状态行必须默认优先（否则开了默认还显示本次）')
+  const body = src.slice(at, at + 400)
+  assert.ok(/setPinnedModel\(\{ enabled: true, provider, model \}\)/.test(body), '选模型必须落成固定记录')
+  assert.ok(!/oncePin/.test(src), '「本次」记录必须彻底删除')
+  const s2 = src.indexOf('const statusLine =')
+  const sb = src.slice(s2, s2 + 300)
+  assert.ok(/pinComplete\(pin\.pinned\)/.test(sb), '状态行必须读固定记录')
+  assert.ok(!/statusOnce/.test(src), '状态行不得再有「本次」')
 })
 
 test('R11c: 仅修复路径也跟随同一个模型（一个选择管两步）', () => {
@@ -279,7 +272,7 @@ test('R11c: 仅修复路径也跟随同一个模型（一个选择管两步）',
   const start = src.indexOf('async function runRepair(')
   const next = src.indexOf('\nasync function ', start + 10)
   const body = src.slice(start, next === -1 ? undefined : next)
-  assert.ok(/effectivePin\(sessionId\)/.test(body), '修复步骤必须读同一个模型选择')
+  assert.ok(/effectivePin\(\)/.test(body), '修复步骤必须读同一个模型选择')
   assert.ok(/req\.provider = pin\.provider/.test(body) && /req\.model = pin\.model/.test(body), '修复请求必须带同一个模型')
   assert.ok(/task: 'prompt_repair'/.test(body), '修复步骤必须留在 prompt_repair 任务上（日志/归属）')
   // 两处调用点都必须是同一套 pin 分支
@@ -381,22 +374,18 @@ test('R18: 存储归一化——旧裸 {provider,model} 视为开启，半条记
   assert.equal(normalizePinMirror({ enabled: false, provider: 'p', model: 'm' }).enabled, false)
 })
 
-test('R19: pin 优先级——本次 > 默认 > 无；半条记录不生效；消费后回默认', () => {
-  let once = null
-  let def = { enabled: false, provider: '', model: '' }
+test('R19: 只有「固定 / 未固定」两态：半条记录不生效，取消后回主模型', () => {
+  let rec = { enabled: false, provider: '', model: '' }
   const complete = (p) => Boolean(p?.enabled && p.provider && p.model)
-  const effective = () => (once ?? (complete(def) ? { provider: def.provider, model: def.model } : null))
-  const consume = () => { once = null }
+  const effective = () => (complete(rec) ? { provider: rec.provider, model: rec.model } : null)
 
-  assert.equal(effective(), null, '没选过 → 裸请求')
-  def = { ...def, enabled: true }
-  assert.equal(effective(), null, '开关开了但没有模型 → 不生效')
-  def = { ...def, provider: 'p', model: 'm' }
+  assert.equal(effective(), null, '没固定 → 主模型')
+  rec = { ...rec, enabled: true }
+  assert.equal(effective(), null, '开了但没有模型 → 不生效')
+  rec = { ...rec, provider: 'p', model: 'm' }
   assert.deepEqual(effective(), { provider: 'p', model: 'm' })
-  once = { provider: 'q', model: 'n' }
-  assert.deepEqual(effective(), { provider: 'q', model: 'n' }, '本次必须压过默认')
-  consume()
-  assert.deepEqual(effective(), { provider: 'p', model: 'm' }, '消费后回默认')
+  rec = { ...rec, enabled: false, provider: '', model: '' }
+  assert.equal(effective(), null, '取消固定 → 主模型')
 })
 
 // ── 汇总 ──
