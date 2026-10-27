@@ -1,7 +1,8 @@
 """后端半边的行为测试（写 config.yaml 的那 40 行）。
 
-跑法（要 Hermes 自带的 venv，里面有 fastapi / yaml）：
-    ~/.hermes/hermes-agent/venv/bin/python3 tests/backend.test.py
+跑法（要 Hermes 自带的 venv，里面有 fastapi / yaml；PYTHONPATH 指向
+hermes-agent 仓根——`hermes_yaml` 在那里，venv 里没装）：
+    PYTHONPATH=~/.hermes/hermes-agent ~/.hermes/hermes-agent/venv/bin/python3 tests/backend.test.py
 
 不碰真实配置：把 `_config_path` 指到一个临时文件，只验证「写进去的键对不对」。
 读取用的 `load_config_readonly()` 属于 Hermes 内部缓存，这里替换成直接解析临时

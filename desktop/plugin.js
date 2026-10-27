@@ -12,9 +12,10 @@
  *   undo, never "back to the half-fixed draft".
  *   - read:  host.composer.getDraft (official session-addressed draft)
  *   - write: host.composer.setDraft — the app re-hydrates @ref / `/` tokens
- *   - model: ONE choice covers both steps. No pick → both requests go out BARE
- *            (no session_id) and land on the configured aux route; a pick from
- *            the ⌘ menu (this run / default) rides on BOTH requests.
+ *   - model: ONE choice covers both steps, and it lives in config.yaml
+ *            (`auxiliary.prompt_repair` / `prompt_enhancement`, written by the
+ *            backend half). Requests go out BARE either way — no provider/model
+ *            rides on them, so the pick applies without a host upgrade.
  *            NOTE: `auxiliary.<task>.timeout` does NOT apply here — the backend
  *            hard-caps each one-shot at 60s (agent/oneshot.py).
  *   - A2:    write-back only when draft untouched during the wait
