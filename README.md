@@ -33,13 +33,15 @@ hermes plugins update prompt-enhancer
 ```
 
 > 目录条目钉在某个已评审的 commit 上——作者仓库的后续提交不会自动进目录，实际装到的版本以插件卡片上的版本号为准。
+>
+> 装完按钮没出现？去 **技能与工具 → 插件 → Prompt Enhancer** 打开它：包管理安装的桌面副本默认是关的，不加载、也不报错，只是静默不出现。
 
 **方式二：从 Git 安装（装仓库最新提交）**
 
 对 Hermes 说：
 
 ```
-从 Git 安装这个桌面插件：https://github.com/Heybinshao/prompt-enhancer
+从 Git 安装这个桌面插件：https://github.com/Heybinshao/prompt-enhancer，安装好后并打开插件
 ```
 
 也可以走桌面端「技能与工具 → 插件」页面上方的「从 Git 安装」按钮。这条路径装的是仓库当前提交（没有经过目录评审）；升级方式：重做一遍上述安装，弹窗里勾「强制重装」。
