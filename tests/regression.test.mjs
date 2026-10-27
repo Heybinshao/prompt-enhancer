@@ -252,6 +252,15 @@ test('R20: 多 profile 接线——菜单按会话 profile 拉、裸请求带 pr
   assert.ok(/onRetry, \(\) => seq !== st\.seq\)/.test(src), '重试未接取消信号')
 })
 
+test('R22: 未固定时状态行带出默认主模型名', () => {
+  const fs = process.getBuiltinModule('fs')
+  const src = fs.readFileSync(new URL('../desktop/plugin.js', import.meta.url), 'utf8')
+  assert.ok(/statusMain: \(m\) => \(m \?/.test(src), 'statusMain 必须接收模型名')
+  assert.ok(/host\.state\?\.model\?\.get\?\.\(\)/.test(src), '未订阅 host.state.model')
+  assert.ok(/host\.state\?\.model\?\.listen\?\./.test(src), '缺主模型变化订阅')
+  assert.ok(/t\('menu\.statusMain', mainModel\)/.test(src), '状态行未传主模型名')
+})
+
 test('R11e: 选模型即固定（菜单不关），状态行只有固定/未固定两态', () => {
   const fs = process.getBuiltinModule('fs')
   const src = fs.readFileSync(new URL('../desktop/plugin.js', import.meta.url), 'utf8')

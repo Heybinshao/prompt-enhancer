@@ -191,7 +191,7 @@ const LOCALES = {
   en: {
     tip: { idle: 'Enhance prompt', repairing: 'Fixing typos…', enhancing: 'Enhancing…', retrying: 'Rate limited — retrying…', repaired: 'Input fixed — click to revert', revert: 'Revert to original' },
     menu: {
-      statusMain: 'Current model: default',
+      statusMain: (m) => (m ? `Current model: default (${m})` : 'Current model: default'),
       statusDefault: (m) => `Current model: ${m}`,
       statusUnsupported: "This Hermes build can't switch models — the main model is used",
       reset: 'Reset to default'
@@ -216,7 +216,7 @@ const LOCALES = {
   zh: {
     tip: { idle: '增强提示词', repairing: '修复输入中…', enhancing: '增强中…', retrying: '限流重试中…', repaired: '已修复输入 · 恢复原文', revert: '恢复原文' },
     menu: {
-      statusMain: '当前增强模型：默认',
+      statusMain: (m) => (m ? `当前增强模型：默认主模型（${m}）` : '当前增强模型：默认主模型'),
       statusDefault: (m) => `当前增强模型：${m}`,
       statusUnsupported: '这一版 Hermes 还不能换模型，已用主模型',
       reset: '恢复默认'
@@ -241,7 +241,7 @@ const LOCALES = {
   'zh-hant': {
     tip: { idle: '增強提示詞', repairing: '修復輸入中…', enhancing: '增強中…', retrying: '限流重試中…', repaired: '已修復輸入 · 恢復原文', revert: '恢復原文' },
     menu: {
-      statusMain: '當前增強模型：預設',
+      statusMain: (m) => (m ? `當前增強模型：預設主模型（${m}）` : '當前增強模型：預設主模型'),
       statusDefault: (m) => `當前增強模型：${m}`,
       statusUnsupported: '這一版 Hermes 還不能換模型，已用主模型',
       reset: '恢復預設'
@@ -814,6 +814,13 @@ function EnhanceButton() {
   // composer's button so the tooltip can never disagree with what the next call
   // will actually use.
   const [pin, setPin] = useState(snapshotPin)
+  // Main model's name for the "default" status line. host.state.model is a live
+  // atom and .listen() does not replay, so seed from .get().
+  const [mainModel, setMainModel] = useState(() => host.state?.model?.get?.() || '')
+  useEffect(() => {
+    const unbind = host.state?.model?.listen?.((next) => setMainModel(next || ''))
+    return () => { if (typeof unbind === 'function') unbind() }
+  }, [])
   const [menuOpen, setMenuOpen] = useState(false)
   // Which session/profile the OPEN menu belongs to: the catalog is per profile,
   // and the default 'default' made a secondary profile's picker list the wrong
@@ -936,7 +943,7 @@ function EnhanceButton() {
     ? t('menu.statusUnsupported')
     : pinComplete(pin.pinned)
       ? t('menu.statusDefault', pinLabel(pin.pinned))
-      : t('menu.statusMain')
+      : t('menu.statusMain', mainModel)
 
   return jsx(DropdownMenu, {
     open: menuOpen,
