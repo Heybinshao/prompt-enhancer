@@ -192,7 +192,7 @@ const LOCALES = {
     tip: { idle: 'Enhance prompt', repairing: 'Fixing typos…', enhancing: 'Enhancing…', retrying: 'Rate limited — retrying…', repaired: 'Input fixed — click to revert', revert: 'Revert to original' },
     menu: {
       statusMainTitle: 'Current: default main model',
-      statusMainTitleUnsupported: 'Current: default main model (this build cannot pin)',
+      statusMainTitleUnsupported: 'Current: default main model (custom model unavailable)',
       statusPinTitle: 'Current: custom model',
       reset: 'Reset to default'
     },
@@ -217,7 +217,7 @@ const LOCALES = {
     tip: { idle: '增强提示词', repairing: '修复输入中…', enhancing: '增强中…', retrying: '限流重试中…', repaired: '已修复输入 · 恢复原文', revert: '恢复原文' },
     menu: {
       statusMainTitle: '当前增强：默认主模型',
-      statusMainTitleUnsupported: '当前增强：默认主模型（本机不支持自定义）',
+      statusMainTitleUnsupported: '当前增强：默认主模型（自定义暂不可用）',
       statusPinTitle: '当前增强：自定义模型',
       reset: '恢复默认'
     },
@@ -242,7 +242,7 @@ const LOCALES = {
     tip: { idle: '增強提示詞', repairing: '修復輸入中…', enhancing: '增強中…', retrying: '限流重試中…', repaired: '已修復輸入 · 恢復原文', revert: '恢復原文' },
     menu: {
       statusMainTitle: '當前增強：預設主模型',
-      statusMainTitleUnsupported: '當前增強：預設主模型（本機不支援自訂）',
+      statusMainTitleUnsupported: '當前增強：預設主模型（自訂暫不可用）',
       statusPinTitle: '當前增強：自訂模型',
       reset: '恢復預設'
     },
