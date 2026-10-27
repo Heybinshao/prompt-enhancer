@@ -178,36 +178,44 @@ test('R9: chip token 走草稿文本保护，模板含 token 保真约束', () =
 // write-back layer was deleted with the catalog review #121246 — chip
 // hydration is now entirely the official setDraft's job. sdk-only.test.mjs
 // pins the new contract.
-// [v1.8.0] 模型 pin（⌘+点击）回归。v1.6.1 曾因宿主契约没有 provider/model
-// 整块删掉（e5cc952）；现在加回，但三条不变量必须同时成立——裸请求路径原样、
-// pin 只在完整记录上生效、宿主拒收时降级成裸请求而不是把一次点击变成报错。
-test('R11: 模型 pin 存在，透传被 if(pin) 包住（未选模型时请求与 v1.7.1 一致）', () => {
+// [v2.0.0] 模型选择的落地方式换成了「写配置」：渲染进程写不了 config.yaml，
+// 由插件的后端半边写 auxiliary.prompt_repair / prompt_enhancement，Hermes 每次
+// 调用都重读，所以立即生效、不需要重启。请求本身永远不带 provider/model。
+test('R11: 选择走「写配置」桥，请求保持裸发（不带 provider/model）', () => {
   const fs = process.getBuiltinModule('fs')
   const src = fs.readFileSync(new URL('../desktop/plugin.js', import.meta.url), 'utf8')
   const need = [
     'ModelCatalogMenu', 'ModelMenuCloseContext', 'metaGesture',
-    'setPinnedModel', 'effectivePin', 'enhanceModel'
+    'saveModel', 'persistModel', 'readPersistedModel'
   ]
   const missing = need.filter((n) => !src.includes(n))
-  assert.equal(missing.length, 0, '缺 pin 组件: ' + missing.join(', '))
+  assert.equal(missing.length, 0, '缺组件: ' + missing.join(', '))
   // ⌘/Ctrl+点击只开菜单，不触发增强
   assert.ok(/if \(e\?\.metaKey \|\| e\?\.ctrlKey\) return/.test(src), 'onClick 缺 ⌘ 早退')
-  const at = src.indexOf('\n    if (pin) {')
-  assert.ok(at > 0, '缺 pin 条件分支（裸请求必须原样）')
-  const body = src.slice(at, src.indexOf('\n    }', at))
-  assert.ok(/req\.provider = pin\.provider/.test(body), 'pin 分支缺 provider')
-  assert.ok(/req\.model = pin\.model/.test(body), 'pin 分支缺 model')
-  assert.ok(/req\.session_id = sessionId/.test(body), 'pin 分支缺 session_id（会话 profile 作用域）')
+  // 两次请求都不许再带模型字段（宿主不收；路由由 config 决定）
+  assert.ok(!/req\.provider\s*=/.test(src), '请求不得再带 provider')
+  assert.ok(!/req\.model\s*=/.test(src), '请求不得再带 model')
 })
 
-test('R11b: 宿主契约没有 provider/model 时降级为裸请求（不把点击变成 4000）', () => {
+test('R11b: 写配置桥——POST /model、恢复默认用 clear、失败回滚并告知', () => {
   const fs = process.getBuiltinModule('fs')
   const src = fs.readFileSync(new URL('../desktop/plugin.js', import.meta.url), 'utf8')
-  assert.ok(/function isContractReject\(/.test(src), '缺契约拒收识别')
-  assert.ok(/Extra inputs are not permitted/.test(src), '缺 extra=forbid 文案判据')
-  assert.ok(/delete bare\.provider/.test(src) && /delete bare\.model/.test(src), '缺降级剥字段')
-  assert.ok(/hostRejectsPin = true/.test(src), '降级后必须记住本次运行')
-  assert.ok(!/pinUnsupported/.test(src), '降级不得再弹用户提示（两态产品不该暴露宿主限制）')
+  assert.ok(/restApi\('\/model', \{/.test(src), '缺 POST /model 调用')
+  assert.ok(/provider && model \? \{ provider, model \} : \{ clear: true \}/.test(src), '恢复默认必须发 clear')
+  assert.ok(/pinnedModel = prev/.test(src) && /emitPin\(\)/.test(src), '写失败必须回滚显示')
+  assert.ok(/tNotify\('error', 'notify\.saveFailed'\)/.test(src), '写失败必须告知')
+  assert.ok(!/pinUnsupported/.test(src), '不得再出现宿主限制类提示')
+})
+
+test('R11c: 修复与增强都用同一份配置（请求不带模型，task 名保留）', () => {
+  const fs = process.getBuiltinModule('fs')
+  const src = fs.readFileSync(new URL('../desktop/plugin.js', import.meta.url), 'utf8')
+  const start = src.indexOf('async function runRepair(')
+  const next = src.indexOf('\nasync function ', start + 10)
+  const body = src.slice(start, next === -1 ? undefined : next)
+  assert.ok(/task: 'prompt_repair'/.test(body), '修复步骤必须留在 prompt_repair（配置按这个键读）')
+  assert.ok(!/req\.provider|req\.model/.test(body), '修复请求不得自带模型')
+  assert.ok(/Object\.assign\(req, profileScope\(/.test(body), '修复请求必须带 profile')
 })
 
 test('R11d: 「恢复默认」常驻，未固定时置灰（不是隐藏）', () => {
@@ -216,40 +224,47 @@ test('R11d: 「恢复默认」常驻，未固定时置灰（不是隐藏）', ()
   const at = src.indexOf("key: 'reset'")
   assert.ok(at > 0, '缺「恢复默认」菜单项')
   const body = src.slice(at, at + 500)
-  assert.ok(/setPinnedModel\(\{ enabled: false/.test(body), '恢复默认必须清掉记录')
+  assert.ok(/saveModel\('', ''\)/.test(body), '恢复默认必须清掉配置')
   assert.ok(/disabled: !pinComplete\(pin\.pinned\)/.test(body), '未固定时必须置灰而不是消失')
   assert.ok(!src.includes('clearOnce'), '不得再有并列的清除入口')
 })
 
-test('R21: 菜单去掉宿主提示行与目录尾巴 + 按钮 a11y', () => {
+test('R11e: 选模型 = 写配置并即时显示，菜单保持打开，状态行两态', () => {
   const fs = process.getBuiltinModule('fs')
   const src = fs.readFileSync(new URL('../desktop/plugin.js', import.meta.url), 'utf8')
-  // 常驻的宿主提示行已删除（改为失败后 statusUnsupported 才说）
-  assert.ok(!/hostNote/.test(src), '宿主提示行应已删除')
-  // 目录自带的两行（添加自定义模型 / 编辑模型）只在本插件菜单里隐藏
-  assert.ok(/pe-model-menu \[role="menuitem"\]:has\(\.codicon-add\)/.test(src), '缺「添加自定义模型」行隐藏规则')
-  assert.ok(/pe-model-menu \[role="menuitem"\]:has\(\.codicon-settings-gear\)/.test(src), '缺「编辑模型」行隐藏规则')
-  assert.ok(/className: 'w-72 p-0 pe-model-menu'/.test(src), '菜单容器缺标记类')
-  // Radix 把 aria-* 挂在外层 span，按钮本体要自己声明
-  assert.ok(/'aria-haspopup': 'menu'/.test(src), '按钮缺 aria-haspopup')
-  assert.ok(/'aria-expanded': menuOpen/.test(src), '按钮缺 aria-expanded')
+  assert.ok(/suppressClose/.test(src), '缺 keep-open 标记')
+  const at = src.indexOf('select: (model, provider) => {')
+  assert.ok(at > 0, '缺 controller.select')
+  const body = src.slice(at, at + 400)
+  assert.ok(/saveModel\(provider, model\)/.test(body), '选模型必须落到 saveModel')
+  assert.ok(!/oncePin/.test(src), '「本次」记录必须彻底删除')
+  const s2 = src.indexOf('const isPinned = pinComplete(pin.pinned)')
+  assert.ok(s2 > 0, '状态行必须读固定记录')
+  const sb = src.slice(s2, s2 + 400)
+  assert.ok(/isPinned \? pinLabel\(pin\.pinned\)/.test(sb), '已固定时第二行显示自定义模型名')
+  assert.ok(/mainModel \|\| '—'/.test(sb), '未固定时第二行显示主模型名')
 })
 
-test('R20: 多 profile 接线——菜单按会话 profile 拉、裸请求带 profile、本次 pin 绑会话', () => {
+test('R20: 多 profile 接线——菜单按会话 profile 拉、裸请求带 profile', () => {
   const fs = process.getBuiltinModule('fs')
   const src = fs.readFileSync(new URL('../desktop/plugin.js', import.meta.url), 'utf8')
-  // 菜单：profile / gateway 由打开时捕获的 menuTarget 提供（默认 'default' 是错的）
   assert.ok(/profile: menuTarget\.profile \|\| 'default'/.test(src), '菜单缺 profile')
   assert.ok(/gateway: menuTarget\.gateway \?\? undefined/.test(src), '菜单缺 gateway')
-  assert.ok(/host\.state\.focusedSessionProfile\.get\(\)/.test(src), '未读会话所属 profile')
-  // 裸请求（无 pin）必须带 profile，否则落 launch profile 的辅助路由；两处调用点都要有
   const profileAssigns = (src.match(/Object\.assign\(req, profileScope\(/g) || []).length
   assert.ok(profileAssigns >= 2, '增强与修复的裸请求都应带 profile，实际 ' + profileAssigns)
-  assert.ok(/profileScope\(host\.state\.focusedSessionProfile\.get\(\)\)/.test(src), '未读会话所属 profile')
-  // 跨窗口同步
   assert.ok(/addEventListener\?\.\(window, 'storage'/.test(src), '缺 storage 跨窗口同步')
-  // 取消要传 isCancelled
   assert.ok(/onRetry, \(\) => seq !== st\.seq\)/.test(src), '重试未接取消信号')
+})
+
+test('R21: 菜单去掉目录尾巴 + 按钮 a11y', () => {
+  const fs = process.getBuiltinModule('fs')
+  const src = fs.readFileSync(new URL('../desktop/plugin.js', import.meta.url), 'utf8')
+  assert.ok(!/hostNote/.test(src), '宿主提示行应已删除')
+  assert.ok(/pe-model-menu \[role="menuitem"\]:has\(\.codicon-add\)/.test(src), '缺「添加自定义模型」隐藏规则')
+  assert.ok(/pe-model-menu \[role="menuitem"\]:has\(\.codicon-settings-gear\)/.test(src), '缺「编辑模型」隐藏规则')
+  assert.ok(/className: 'w-72 p-0 pe-model-menu'/.test(src), '菜单容器缺标记类')
+  assert.ok(/'aria-haspopup': 'menu'/.test(src), '按钮缺 aria-haspopup')
+  assert.ok(/'aria-expanded': menuOpen/.test(src), '按钮缺 aria-expanded')
 })
 
 test('R22: 状态行两行——标题说跟随谁，第二行说模型名', () => {
@@ -260,38 +275,6 @@ test('R22: 状态行两行——标题说跟随谁，第二行说模型名', () 
   assert.ok(/host\.state\?\.model\?\.get\?\.\(\)/.test(src), '未读 host.state.model')
   assert.ok(/host\.state\?\.model\?\.listen\?\./.test(src), '缺主模型变化订阅')
   assert.ok(/children: statusTitle/.test(src) && /children: statusValue/.test(src), '状态行未渲染成两行')
-})
-
-test('R11e: 选模型即固定（菜单不关），状态行只有固定/未固定两态', () => {
-  const fs = process.getBuiltinModule('fs')
-  const src = fs.readFileSync(new URL('../desktop/plugin.js', import.meta.url), 'utf8')
-  assert.ok(/suppressClose/.test(src), '缺 keep-open 标记')
-  assert.ok(/if \(suppressClose\.current\) \{/.test(src), '缺「吞掉选择后的关闭」分支')
-  const at = src.indexOf('select: (model, provider) => {')
-  assert.ok(at > 0, '缺 controller.select')
-  const body = src.slice(at, at + 400)
-  assert.ok(/setPinnedModel\(\{ enabled: true, provider, model \}\)/.test(body), '选模型必须落成固定记录')
-  assert.ok(!/oncePin/.test(src), '「本次」记录必须彻底删除')
-  const s2 = src.indexOf('const isPinned = pinComplete(pin.pinned)')
-  assert.ok(s2 > 0, '状态行必须读固定记录')
-  const sb = src.slice(s2, s2 + 400)
-  assert.ok(/isPinned \? pinLabel\(pin\.pinned\)/.test(sb), '已固定时第二行显示自定义模型名')
-  assert.ok(/mainModel \|\| '—'/.test(sb), '未固定时第二行显示主模型名')
-  assert.ok(!/statusOnce/.test(src), '状态行不得再有「本次」')
-})
-
-test('R11c: 仅修复路径也跟随同一个模型（一个选择管两步）', () => {
-  const fs = process.getBuiltinModule('fs')
-  const src = fs.readFileSync(new URL('../desktop/plugin.js', import.meta.url), 'utf8')
-  const start = src.indexOf('async function runRepair(')
-  const next = src.indexOf('\nasync function ', start + 10)
-  const body = src.slice(start, next === -1 ? undefined : next)
-  assert.ok(/effectivePin\(\)/.test(body), '修复步骤必须读同一个模型选择')
-  assert.ok(/req\.provider = pin\.provider/.test(body) && /req\.model = pin\.model/.test(body), '修复请求必须带同一个模型')
-  assert.ok(/task: 'prompt_repair'/.test(body), '修复步骤必须留在 prompt_repair 任务上（日志/归属）')
-  // 两处调用点都必须是同一套 pin 分支
-  const pinBlocks = (src.match(/^\s+if \(pin\) \{$/gm) || []).length
-  assert.ok(pinBlocks >= 2, '增强与修复都应各有 pin 分支，实际 ' + pinBlocks)
 })
 
 // R12 (v1.8.0 恢复为 R18/R19 的语义镜像): 被镜像的归一化与优先级逻辑见下。

@@ -1,13 +1,14 @@
 name: prompt-enhancer
-version: 1.9.5
+version: 2.0.0
 requires_hermes: ">=0.21.6"
-description: "A button in the Hermes Desktop composer that first repairs dictation typos in the draft, then rewrites it into a structured prompt (task / scope / constraints / output shape), with one more click to restore the original typing. ⌘-click picks the enhancement model for one run or as the default. Two stateless gateway calls (repair → enhance), preserves @file and /command chips, per-session state."
+description: "A button in the Hermes Desktop composer that first repairs dictation typos in the draft, then rewrites it into a structured prompt; one more click restores the original typing. ⌘-click picks the model both steps use (written to auxiliary.prompt_* in config.yaml). Two stateless gateway calls, preserves @file and /command chips, per-session state."
 author: Heybinshao
 license: MIT
 homepage: https://github.com/Heybinshao/prompt-enhancer
 tags: [desktop, composer, prompt, llm]
-# Desktop-only package: the UI lives in desktop/plugin.js and registers nothing
-# on the agent side (no tools, hooks, middleware or env vars).
+# Two halves: the UI in desktop/plugin.js, and a tiny backend (dashboard/) whose
+# only job is writing the model choice into config.yaml. Nothing is registered on
+# the agent side (no tools, hooks, middleware or env vars).
 provides_tools: []
 provides_hooks: []
 capabilities: []

@@ -70,11 +70,13 @@ export const Fragment = 'Fragment'
 
 const EXPORTS = `
 export const __test = {
-  normalizePin, loadPin, setPinnedModel, effectivePin,
+  normalizePin, loadPin, setPinnedModel, saveModel, persistModel, readPersistedModel,
   pinComplete, snapshotPin, isContractReject, callGatewayWithRetry, cleanRepair,
   stripWrappingQuotes, looksTruncated, outputCapFor, maxTokensFor, profileScope,
   repairDriftOk, chipsPreserved, REPAIR_PREFIX_RE,
   setStorage: (s) => { storageApi = s },
+  setRest: (fn) => { restApi = fn },
+  setKeepLocalOnly: (v) => { keepLocalOnly = v },
   getPinned: () => pinnedModel,
   setHostRejectsPin: (v) => { hostRejectsPin = v },
   setHostRejectsProfile: (v) => { hostRejectsProfile = v }
@@ -124,21 +126,26 @@ test('T2: 固定值整条落盘，取消固定后清空记录', () => {
   assert.deepEqual(JSON.parse(storage.data['enhanceModel']), { enabled: false, provider: '', model: '' })
 })
 
-test('T3: 固定即生效；未固定回主模型（没有「本次」这一档）', () => {
-  const storage = fakeStorage()
-  T.setStorage(storage)
-  T.setPinnedModel({ enabled: false, provider: '', model: '' })
-  assert.equal(T.effectivePin(), null, '未固定 → 主模型')
-  T.setPinnedModel({ enabled: true, provider: 'p1', model: 'm1' })
-  assert.deepEqual(T.effectivePin(), { provider: 'p1', model: 'm1' })
-  assert.equal(T.getPinned().model, 'm1', '记录应保留以跨会话/跨重启复用')
+test('T3: 选模型写的是 auxiliary 配置（两个任务一起写），不是请求参数', async () => {
+  const calls = []
+  T.setRest(async (path, opts) => { calls.push({ path, opts }); return { ok: true } })
+  T.setKeepLocalOnly(false)
+  const ok = await T.saveModel('magpie', 'm1')
+  assert.equal(ok, true)
+  assert.equal(calls[0].path, '/model')
+  assert.deepEqual(calls[0].opts.body, { provider: 'magpie', model: 'm1' })
+  assert.equal(T.getPinned().model, 'm1', '显示层同步记录')
 })
 
-test('T4: 降级标记一置，固定值也不再生效', () => {
-  T.setPinnedModel({ enabled: true, provider: 'p1', model: 'm1' })
-  T.setHostRejectsPin(true)
-  assert.equal(T.effectivePin(), null)
-  T.setHostRejectsPin(false)
+test('T4: 写配置失败 → 回滚显示（不留假承诺）', async () => {
+  T.setRest(async () => { throw new Error('backend half missing') })
+  T.setKeepLocalOnly(false)
+  T.setPinnedModel({ enabled: false, provider: '', model: '' })
+  const ok = await T.saveModel('magpie', 'm1')
+  assert.equal(ok, false)
+  assert.equal(T.getPinned().enabled, false, '失败后不得显示为已固定')
+  T.setRest(null)
+  T.setKeepLocalOnly(true)
 })
 
 // ── 请求侧 ───────────────────────────────────────────────────────────────
@@ -174,7 +181,6 @@ test('T8: 宿主契约拒收 → 剥掉 pin 重发裸请求，并记住本次运
   assert.equal(calls[1].model, undefined)
   assert.equal(calls[1].session_id, undefined, '降级请求必须连 session_id 一起去掉')
   assert.ok(T.getPinned().enabled, '固定记录仍在（只是这次回落）')
-  assert.equal(T.effectivePin(), null, '降级后不得再宣称在用 pin')
 })
 
 await testAsync('T9: 取消后不再重试（isCancelled 生效）', async () => {
