@@ -210,24 +210,26 @@ test('R11b: 宿主契约没有 provider/model 时降级为裸请求（不把点�
   assert.ok(/tNotify\('info', 'notify\.pinUnsupported'\)/.test(src), '降级要给用户一句解释')
 })
 
-test('R11d: 一条「取消固定」清掉记录（只有一个清除入口）', () => {
+test('R11d: 「恢复默认」常驻，未固定时置灰（不是隐藏）', () => {
   const fs = process.getBuiltinModule('fs')
   const src = fs.readFileSync(new URL('../desktop/plugin.js', import.meta.url), 'utf8')
   const at = src.indexOf("key: 'reset'")
-  assert.ok(at > 0, '缺「取消固定」菜单项')
+  assert.ok(at > 0, '缺「恢复默认」菜单项')
   const body = src.slice(at, at + 500)
-  assert.ok(/setPinnedModel\(\{ enabled: false/.test(body), '取消固定必须清掉记录')
-  assert.ok(/pinComplete\(pin\.pinned\) \? jsx/.test(src), '取消固定只在已固定时出现')
+  assert.ok(/setPinnedModel\(\{ enabled: false/.test(body), '恢复默认必须清掉记录')
+  assert.ok(/disabled: !pinComplete\(pin\.pinned\)/.test(body), '未固定时必须置灰而不是消失')
   assert.ok(!src.includes('clearOnce'), '不得再有并列的清除入口')
 })
 
-test('R21: 菜单预告宿主依赖 + 按钮 a11y + draft 不清本次', () => {
+test('R21: 菜单去掉宿主提示行与目录尾巴 + 按钮 a11y', () => {
   const fs = process.getBuiltinModule('fs')
   const src = fs.readFileSync(new URL('../desktop/plugin.js', import.meta.url), 'utf8')
-  // 菜单里常驻一行「需宿主支持」，检测到降级后换成更强的 statusUnsupported
-  assert.ok(/key: 'hostNote'/.test(src), '缺宿主依赖提示行')
-  assert.ok(/pin\.unsupported \? null : jsx\(DropdownMenuItem, \{\s*\n\s*key: 'hostNote'/.test(src), '提示行应在已降级时让位')
-  assert.ok(/hostNote: /.test(src), '缺 hostNote 文案')
+  // 常驻的宿主提示行已删除（改为失败后 statusUnsupported 才说）
+  assert.ok(!/hostNote/.test(src), '宿主提示行应已删除')
+  // 目录自带的两行（添加自定义模型 / 编辑模型）只在本插件菜单里隐藏
+  assert.ok(/pe-model-menu \[role="menuitem"\]:has\(\.codicon-add\)/.test(src), '缺「添加自定义模型」行隐藏规则')
+  assert.ok(/pe-model-menu \[role="menuitem"\]:has\(\.codicon-settings-gear\)/.test(src), '缺「编辑模型」行隐藏规则')
+  assert.ok(/className: 'w-72 p-0 pe-model-menu'/.test(src), '菜单容器缺标记类')
   // Radix 把 aria-* 挂在外层 span，按钮本体要自己声明
   assert.ok(/'aria-haspopup': 'menu'/.test(src), '按钮缺 aria-haspopup')
   assert.ok(/'aria-expanded': menuOpen/.test(src), '按钮缺 aria-expanded')

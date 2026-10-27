@@ -191,11 +191,10 @@ const LOCALES = {
   en: {
     tip: { idle: 'Enhance prompt', repairing: 'Fixing typos…', enhancing: 'Enhancing…', retrying: 'Rate limited — retrying…', repaired: 'Input fixed — click to revert', revert: 'Revert to original' },
     menu: {
-      statusMain: 'Using the main model',
-      statusDefault: (m) => `Pinned: ${m}`,
+      statusMain: 'Current model: default',
+      statusDefault: (m) => `Current model: ${m}`,
       statusUnsupported: "This Hermes build can't switch models — the main model is used",
-      hostNote: "Switching models needs a newer Hermes; until then the main model is used",
-      reset: 'Unpin'
+      reset: 'Reset to default'
     },
     notify: {
       noEditor: 'Composer not found',
@@ -217,11 +216,10 @@ const LOCALES = {
   zh: {
     tip: { idle: '增强提示词', repairing: '修复输入中…', enhancing: '增强中…', retrying: '限流重试中…', repaired: '已修复输入 · 恢复原文', revert: '恢复原文' },
     menu: {
-      statusMain: '用主模型（未固定）',
-      statusDefault: (m) => `固定：${m}`,
+      statusMain: '当前增强模型：默认',
+      statusDefault: (m) => `当前增强模型：${m}`,
       statusUnsupported: '这一版 Hermes 还不能换模型，已用主模型',
-      hostNote: '换模型要等 Hermes 更新；在那之前用主模型',
-      reset: '取消固定'
+      reset: '恢复默认'
     },
     notify: {
       noEditor: '未找到输入框',
@@ -243,11 +241,10 @@ const LOCALES = {
   'zh-hant': {
     tip: { idle: '增強提示詞', repairing: '修復輸入中…', enhancing: '增強中…', retrying: '限流重試中…', repaired: '已修復輸入 · 恢復原文', revert: '恢復原文' },
     menu: {
-      statusMain: '用主模型（未固定）',
-      statusDefault: (m) => `固定：${m}`,
+      statusMain: '當前增強模型：預設',
+      statusDefault: (m) => `當前增強模型：${m}`,
       statusUnsupported: '這一版 Hermes 還不能換模型，已用主模型',
-      hostNote: '換模型要等 Hermes 更新；在那之前用主模型',
-      reset: '取消固定'
+      reset: '恢復預設'
     },
     notify: {
       noEditor: '未找到輸入框',
@@ -788,7 +785,15 @@ function injectSpinnerStyle() {
   if (document.getElementById('prompt-enhancer-styles')) return
   const el = document.createElement('style')
   el.id = 'prompt-enhancer-styles'
-  el.textContent = '@keyframes pe-spin{to{transform:rotate(360deg)}}'
+  // The spinner keyframes, plus two rows the catalog appends that this surface
+  // does not want: "add custom model" and "edit models" belong to the composer's
+  // pill, not to a task picker. They are hidden by their icon class, scoped to
+  // OUR menu only — the official pill keeps both rows.
+  el.textContent = [
+    '@keyframes pe-spin{to{transform:rotate(360deg)}}',
+    '.pe-model-menu [role="menuitem"]:has(.codicon-add){display:none}',
+    '.pe-model-menu [role="menuitem"]:has(.codicon-settings-gear){display:none}'
+  ].join('\n')
   document.head.appendChild(el)
 }
 function removeSpinnerStyle() {
@@ -993,7 +998,7 @@ function EnhanceButton() {
         align: 'end',
         side: 'top',
         sideOffset: 6,
-        className: 'w-72 p-0',
+        className: 'w-72 p-0 pe-model-menu',
         children: jsx(ModelMenuCloseContext.Provider, {
           // Our own close: a row select keeps the list open (the scope switch
           // below is often the second half of the same act); Esc, an outside
@@ -1030,24 +1035,12 @@ function EnhanceButton() {
                   children: statusLine
                 })
               }),
-              // The pin rides on a host contract field (#118430). Saying so up
-              // front beats letting the user pick a model, click enhance, and
-              // only THEN learn it fell back — which is what happened on a host
-              // whose build predates the passthrough.
-              pin.unsupported ? null : jsx(DropdownMenuItem, {
-                key: 'hostNote',
-                disabled: true,
-                onSelect: (e) => e.preventDefault(),
-                children: jsx('span', {
-                  style: {
-                    color: 'var(--ui-text-tertiary)', display: 'block', fontSize: '0.62rem',
-                    minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
-                  },
-                  children: t('menu.hostNote')
-                })
-              }),
-              pinComplete(pin.pinned) ? jsx(DropdownMenuItem, {
+              // Always present, greyed out when nothing is pinned: a control the
+              // user can SEE and learn is better than one that appears only after
+              // they have already done the thing.
+              jsx(DropdownMenuItem, {
                 key: 'reset',
+                disabled: !pinComplete(pin.pinned),
                 onSelect: (e) => {
                   e.preventDefault()
                   setPinnedModel({ enabled: false, provider: '', model: '' })
@@ -1056,7 +1049,7 @@ function EnhanceButton() {
                   jsx(Codicon, { key: 'icon', name: 'close', size: '0.75rem' }),
                   jsx('span', { key: 'label', children: t('menu.reset') })
                 ]
-              }) : null
+              })
             ]
           })
         })
