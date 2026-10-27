@@ -51,7 +51,7 @@ const SYSTEM_TEMPLATE = `你是一位提示词工程专家，负责改进用户�
 
 硬性约束：
 1. 语言跟随是最高优先级：必须严格使用与用户输入完全相同的语言（中文输入→中文输出，英文输入→英文输出，混排输入保持自然混排）。
-2. 保持精炼：增强后的提示词不超过约 800 字符。
+2. 保持精炼：增强后的提示词不超过下方给出的输出上限。
 3. 只输出增强后的提示词本身，不要任何解释、前言、markdown 代码围栏或语言标签。
 4. 只改写，不回答：不要回答用户的问题，而是把它改写得更明确。
 5. 不要主动索取教程/操作指南，除非用户明确要求。
@@ -113,7 +113,14 @@ function stripWrappingQuotes(text) {
 }
 
 function looksTruncated(text) {
-  return [':', '：', ',', '，'].includes(String(text).slice(-1))
+  const t = String(text).trim()
+  if (!t) return false
+  // A dangling separator is the classic "stopped at max_tokens" tail…
+  if ([':', '：', ',', '，', '、', '…', '(', '（', '[', '【', '「', '“'].includes(t.slice(-1))) return true
+  // …and so is a half-closed wrapper: the model quit mid-sentence.
+  return [['「', '」'], ['“', '”'], ['（', '）'], ['(', ')'], ['【', '】']].some(
+    ([open, close]) => t.split(open).length !== t.split(close).length
+  )
 }
 
 // ── repair guardrails (pure) ──────────────────────────────────────────────
@@ -142,9 +149,17 @@ function chipsPreserved(original, repaired) {
 
 // The model likes to answer "修复后：……" or wrap the text in quotes. Strip that
 // framing; a result that is still empty afterwards is rejected by the caller.
+// Only META framings are stripped — a bare 「输出：」/「结果：」 is plausible as
+// the user's own opening line, and eating it would corrupt their text.
+const REPAIR_PREFIX_RE =
+  /^(?:以下是(?:修正|修复|校对)(?:后|过的)?的?(?:文本|版本|内容|结果)|(?:修复|修正|校对)后的(?:文本|版本|内容|结果)|(?:修复后|修正后|校对后|已修复|修正版本))[:：]\s*/
+
 function cleanRepair(text) {
-  const stripped = stripWrappingQuotes(String(text ?? ''))
-  return stripped.replace(/^(?:修复后|修正后|校对后|已修复|修正版本)[:：]\s*/, '').trim()
+  // Order matters: drop the meta prefix BEFORE unwrapping quotes, otherwise a
+  // quoted payload ("校对后的内容：「引用」") loses its closing quote to the
+  // unwrapper and the write-back ships a broken pair.
+  const raw = String(text ?? '').trim().replace(REPAIR_PREFIX_RE, '')
+  return stripWrappingQuotes(raw).trim()
 }
 
 function resolveSessionId(btnEl, getActiveSessionId) {
@@ -183,8 +198,8 @@ const LOCALES = {
       off: 'Off',
       on: 'On',
       statusMain: 'Follows the default route (no pin)',
-      statusOnce: (m) => `This run: ${m}`,
-      statusDefault: (m) => `Default: ${m}`,
+      statusOnce: (m) => `This run (enhance only): ${m}`,
+      statusDefault: (m) => `Default (enhance only): ${m}`,
       statusUnsupported: 'This Hermes build cannot pin a model — using the auxiliary route',
       reset: 'Reset to default'
     },
@@ -213,8 +228,8 @@ const LOCALES = {
       off: '关',
       on: '开',
       statusMain: '跟随默认路由（未固定）',
-      statusOnce: (m) => `本次：${m}`,
-      statusDefault: (m) => `默认：${m}`,
+      statusOnce: (m) => `本次（仅增强）：${m}`,
+      statusDefault: (m) => `默认（仅增强）：${m}`,
       statusUnsupported: '当前 Hermes 版本不支持固定模型，已走辅助路由',
       reset: '恢复默认'
     },
@@ -243,8 +258,8 @@ const LOCALES = {
       off: '關',
       on: '開',
       statusMain: '跟隨預設路由（未固定）',
-      statusOnce: (m) => `本次：${m}`,
-      statusDefault: (m) => `預設：${m}`,
+      statusOnce: (m) => `本次（僅增強）：${m}`,
+      statusDefault: (m) => `預設（僅增強）：${m}`,
       statusUnsupported: '目前 Hermes 版本不支援固定模型，已走輔助路由',
       reset: '恢復預設'
     },
@@ -295,6 +310,7 @@ let storageApi = null
 let defaultPin = { enabled: false, provider: '', model: '' }
 let oncePin = null
 let hostRejectsPin = false
+let hostRejectsProfile = false
 const pinListeners = new Set()
 const PIN_KEY = 'enhanceModel'
 
@@ -333,13 +349,15 @@ function setDefaultPin(patch) {
 }
 
 function setOncePin(pin) {
-  oncePin = pin ? { provider: pin.provider, model: pin.model } : null
+  oncePin = pin ? { provider: pin.provider, model: pin.model, sessionId: pin.sessionId ?? null } : null
   emitPin()
 }
 
-function effectivePin() {
+function effectivePin(sessionId) {
   if (hostRejectsPin) return null
-  if (oncePin) return oncePin
+  // A run-scoped pick belongs to the composer it was made in: carrying it into
+  // another session would silently run that session's enhancement on it.
+  if (oncePin && (!oncePin.sessionId || !sessionId || oncePin.sessionId === sessionId)) return oncePin
   return pinComplete(defaultPin) ? { provider: defaultPin.provider, model: defaultPin.model } : null
 }
 
@@ -409,25 +427,58 @@ function isContractReject(err) {
   return /Extra inputs are not permitted|out of sync|\b4000\b/i.test(text)
 }
 
-async function callGatewayWithRetry(gw, req, onRetry) {
+// A bare request resolves under the LAUNCH profile unless the caller names the
+// profile the request belongs to: a session living in a secondary profile used
+// to run (and bill) the default profile's auxiliary route.
+function profileScope(profile) {
+  const p = String(profile ?? '').trim()
+  return p && !hostRejectsProfile ? { profile: p } : {}
+}
+
+// Output budget follows the input: a 3000-character draft squeezed into the old
+// fixed 800 lost most of its content. Floor stays at 800 (short drafts shouldn't
+// balloon), ceiling 2000 (beyond that it stops being a prompt and becomes a
+// rewrite), and max_tokens tracks it so the cap is reachable, not truncated.
+function outputCapFor(inputLen) {
+  return Math.max(800, Math.min(2000, Math.round(inputLen * 0.6)))
+}
+
+function maxTokensFor(cap) {
+  return Math.min(4096, Math.max(2048, Math.round(cap * 2)))
+}
+
+async function callGatewayWithRetry(gw, req, onRetry, isCancelled) {
   for (let attempt = 0; ; attempt++) {
     try {
       return await gw.request('llm.oneshot', req, 180_000)
     } catch (e) {
-      if (req.provider && isContractReject(e)) {
-        hostRejectsPin = true
-        emitPin()
-        tNotify('info', 'notify.pinUnsupported')
+      if (isContractReject(e) && (req.provider || req.profile)) {
+        const wasPinned = Boolean(req.provider)
+        if (wasPinned) {
+          hostRejectsPin = true
+          emitPin()
+          tNotify('info', 'notify.pinUnsupported')
+        } else {
+          // Older hosts predate `profile` on this method: drop it and stay on
+          // the launch profile instead of failing the click.
+          hostRejectsProfile = true
+          console.error('[prompt-enhancer] host rejects llm.oneshot profile — retrying unscoped')
+        }
         const bare = { ...req }
         delete bare.provider
         delete bare.model
         delete bare.session_id
+        delete bare.profile
         // The stored pick is kept: a host update later makes it work again.
-        return callGatewayWithRetry(gw, bare, onRetry)
+        return callGatewayWithRetry(gw, bare, onRetry, isCancelled)
       }
+      // A cancelled run must not keep burning the shared rate limit: the user
+      // already took their draft back, so stop before the backoff.
+      if (isCancelled?.()) throw e
       if (attempt < RETRY_DELAYS_MS.length && isRateLimited(e)) {
         onRetry?.(attempt + 1) // surface "retrying" in the tooltip instead of silent backoff
         await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]))
+        if (isCancelled?.()) throw e
         continue
       }
       throw e
@@ -470,8 +521,9 @@ async function runRepair(c, sessionId, text, st, seq, onRetry) {
       temperature: 0, // proofreading is not a creative task
       // Its own aux task so the two steps can be routed separately (a fast
       // model for repair, a strong one for enhancement).
-      task: 'prompt_repair'
-    }, onRetry)
+      task: 'prompt_repair',
+      ...profileScope(host.state.focusedSessionProfile.get())
+    }, onRetry, () => seq !== st.seq)
   } catch (e) {
     console.error('[prompt-enhancer] repair failed (enhancing the original):', e)
     return null
@@ -537,7 +589,7 @@ async function repairAndApply(c, sessionId, text, st, seq, onRetry) {
 // exactly like the plain-click path — this is a real result, not a preview.
 async function runRepairOnly(btnEl, onPhase, onRetry) {
   const c = sdkComposer()
-  if (!c) return tNotify('error', 'notify.failed', 'requires Hermes ≥ 0.21.5 (composer draft API)')
+  if (!c) return tNotify('error', 'notify.failed', 'requires Hermes ≥ 0.21.6 (composer draft API + model catalog)')
   const editor = resolveEditor(btnEl)
   if (!editor) return tNotify('error', 'notify.noEditor')
   if (!editor.isContentEditable) return tNotify('error', 'notify.notEditable')
@@ -566,7 +618,7 @@ async function runRepairOnly(btnEl, onPhase, onRetry) {
 
 async function runEnhance(btnEl, onPhase, onRetry) {
   const c = sdkComposer()
-  if (!c) return tNotify('error', 'notify.failed', 'requires Hermes ≥ 0.21.5 (composer draft API)')
+  if (!c) return tNotify('error', 'notify.failed', 'requires Hermes ≥ 0.21.6 (composer draft API + model catalog)')
   const editor = resolveEditor(btnEl)
   if (!editor) return tNotify('error', 'notify.noEditor')
   if (!editor.isContentEditable) return tNotify('error', 'notify.notEditable')
@@ -578,7 +630,7 @@ async function runEnhance(btnEl, onPhase, onRetry) {
   // provider/model — the resolver's highest-priority arm — plus the session id
   // so the call stays inside this session's profile scope.
   const sessionId = resolveSessionId(btnEl, () => host.state.activeSessionId.get())
-  const pin = effectivePin()
+  const pin = effectivePin(sessionId)
   const draftText = await c.getDraft(sessionId)
   const text = draftText ?? ''
   if (!text.trim()) {
@@ -619,13 +671,14 @@ async function runEnhance(btnEl, onPhase, onRetry) {
   st.phase = 'enhancing'
   onPhase('enhancing')
   try {
-    const instructions = hasChips
+    const cap = outputCapFor(base.length)
+    const instructions = (hasChips
       ? SYSTEM_TEMPLATE + '\n\n额外硬性约束：文本中的 @file:、@folder:、@url:、@image: 等引用标记是文件/资源引用 token，必须原样保留在增强结果中（位置可以合理调整），禁止改写、翻译或删除它们。'
-      : SYSTEM_TEMPLATE
+      : SYSTEM_TEMPLATE) + `\n\n【输出上限】不超过 ${cap} 字符（本次按输入长度自适应）。`
     const req = {
       instructions,
       input: base,
-      max_tokens: 2048,
+      max_tokens: maxTokensFor(cap),
       temperature: 0.3,
       // NOT the default title_generation: that routes to the weak fast model.
       // A custom task name gets the standard aux route, so `auxiliary.<task>`
@@ -636,6 +689,9 @@ async function runEnhance(btnEl, onPhase, onRetry) {
       req.provider = pin.provider
       req.model = pin.model
       if (sessionId) req.session_id = sessionId
+    } else {
+      // No pin → the aux route, but still the SESSION's profile, not the launch one.
+      Object.assign(req, profileScope(host.state.focusedSessionProfile.get()))
     }
     // host.request is hard-capped at the gateway default 30s
     // (DEFAULT_GATEWAY_REQUEST_TIMEOUT_MS) — LLM generation routinely exceeds
@@ -645,7 +701,7 @@ async function runEnhance(btnEl, onPhase, onRetry) {
     // does NOT apply on this path — the client-side wait is only the outer bound.
     const gw = host.getGateway()
     if (!gw) throw new Error('Hermes gateway unavailable')
-    const res = await callGatewayWithRetry(gw, req, onRetry)
+    const res = await callGatewayWithRetry(gw, req, onRetry, () => seq !== st.seq)
     // Cancelled while waiting → discard the late result silently (the editor
     // still holds whatever step 1 left there; nothing to roll back).
     if (seq !== st.seq) return
@@ -691,7 +747,9 @@ async function runEnhance(btnEl, onPhase, onRetry) {
   } catch (err) {
     if (seq !== st.seq) return // cancelled during retry backoff — stay quiet
     console.error('[prompt-enhancer] enhance failed:', err)
-    tNotify('error', 'notify.failed', err?.message ?? String(err))
+    const raw = String(err?.message ?? err ?? '')
+    // Gateway errors can carry a whole JSON body; a toast is not a log viewer.
+    tNotify('error', 'notify.failed', raw.length > 120 ? `${raw.slice(0, 120)}…` : raw)
     // A failed enhance must not strand a repaired draft in an unusable state:
     // it stays revertable, so the user can still get their typing back.
     const p = settlePhase(st)
@@ -776,6 +834,10 @@ function EnhanceButton() {
   // will actually use.
   const [pin, setPin] = useState(snapshotPin)
   const [menuOpen, setMenuOpen] = useState(false)
+  // Which session/profile the OPEN menu belongs to: the catalog is per profile,
+  // and the default 'default' made a secondary profile's picker list the wrong
+  // models. Captured at open time, when btnRef already points at this composer.
+  const [menuTarget, setMenuTarget] = useState({ sessionId: null, profile: null, gateway: null })
   const metaGesture = useRef(false)
   // Picking a model must NOT dismiss the menu: the scope switch (this run vs
   // default) sits right below the list and is often the second half of the same
@@ -890,7 +952,7 @@ function EnhanceButton() {
         setOncePin(null)
         setDefaultPin({ enabled: true, provider, model })
       } else {
-        setOncePin({ provider, model })
+        setOncePin({ provider, model, sessionId: menuTarget.sessionId })
       }
     },
     setOptions: () => {}
@@ -914,6 +976,14 @@ function EnhanceButton() {
       if (!next) return setMenuOpen(false)
       if (metaGesture.current) {
         suppressClose.current = false
+        const sid = resolveSessionId(btnRef.current, () => host.state.activeSessionId.get())
+        // A run-pick made in another composer is not this composer's pick.
+        if (oncePin && oncePin.sessionId && oncePin.sessionId !== sid) setOncePin(null)
+        setMenuTarget({
+          sessionId: sid,
+          profile: host.state.focusedSessionProfile.get() || null,
+          gateway: host.getGateway() ?? null
+        })
         setMenuOpen(true)
       }
     },
@@ -969,6 +1039,10 @@ function EnhanceButton() {
           },
           children: jsx(ModelCatalogMenu, {
             controller: menuController,
+            // The catalog is per profile and the gateway knows virtual providers
+            // the local REST fallback does not; both are captured at open time.
+            gateway: menuTarget.gateway ?? undefined,
+            profile: menuTarget.profile || 'default',
             // Hosts carrying the picker patch hide the curation rows; on older
             // hosts the prop is inert, so this stays a one-line forward compat.
             showEditModels: false,
@@ -986,7 +1060,11 @@ function EnhanceButton() {
                     key: 'seg',
                     onChange: (id) => {
                       if (id === 'off') return setDefaultPin({ enabled: false })
-                      const pick = pin.once ?? (pinComplete(pin.def) ? pin.def : null)
+                      // Re-enabling must reuse what's stored: turning the switch
+                      // off keeps provider/model on purpose, so demanding a fresh
+                      // pick here made the user redo work they already did.
+                      const pick = pin.once
+                        ?? (pin.def.provider && pin.def.model ? { provider: pin.def.provider, model: pin.def.model } : null)
                       // Switching the default on with nothing picked would
                       // promise a route that doesn't exist → ask for the pick.
                       if (!pick) return tNotify('info', 'notify.pickFirst')
@@ -1055,6 +1133,14 @@ export default {
     defaultPin = loadPin()
     oncePin = null
     hostRejectsPin = false // re-probe the host every load: an update may add the door
+    hostRejectsProfile = false
+    // Two windows share one localStorage but not one module: mirror the other
+    // window's writes instead of showing a stale default there.
+    ctx.addEventListener?.(window, 'storage', (e) => {
+      if (!e || e.key !== `hermes.plugin.${ID}.${PIN_KEY}`) return
+      defaultPin = loadPin()
+      emitPin()
+    })
     injectSpinnerStyle()
 
     ctx.register({

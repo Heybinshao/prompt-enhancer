@@ -46,9 +46,11 @@ test('P5: 只读探针仅剩 isContentEditable + 变更观察', () => {
   if (bad.length) throw new Error('新增直接 editor 操作: ' + [...new Set(bad)].join(', '))
 })
 
-test('P6: 版本闸门字段在 plugin.yaml', () => {
+test('P6: 版本闸门不低于用到的 SDK 导出起点（ModelCatalogMenu = 0.21.6）', () => {
   const y = readFileSync(new URL('../plugin.yaml', import.meta.url), 'utf8')
-  if (!/requires_hermes:\s*">=0\.21\.5"/.test(y)) throw new Error('缺 requires_hermes >=0.21.5')
+  if (!/requires_hermes:\s*">=0\.21\.6"/.test(y)) throw new Error('requires_hermes 必须 >=0.21.6（ModelCatalogMenu/SegmentedControl 最早出现在该版）')
+  // 代码里给用户的提示不能比闸门更旧
+  if (/0\.21\.5/.test(src)) throw new Error('plugin.js 里仍有 >=0.21.5 的过期提示')
 })
 
 test('P7: chip token 识别改在草稿文本上（非 DOM 查询）', () => {

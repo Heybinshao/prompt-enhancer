@@ -222,6 +222,24 @@ test('R11d: 一条「恢复默认」清掉本次+默认（不并列两个清除�
   assert.ok(!src.includes('clearOnce'), '旧的「清除本次选择」入口必须移除（避免两个清除控件）')
 })
 
+test('R20: 多 profile 接线——菜单按会话 profile 拉、裸请求带 profile、本次 pin 绑会话', () => {
+  const fs = process.getBuiltinModule('fs')
+  const src = fs.readFileSync(new URL('../desktop/plugin.js', import.meta.url), 'utf8')
+  // 菜单：profile / gateway 由打开时捕获的 menuTarget 提供（默认 'default' 是错的）
+  assert.ok(/profile: menuTarget\.profile \|\| 'default'/.test(src), '菜单缺 profile')
+  assert.ok(/gateway: menuTarget\.gateway \?\? undefined/.test(src), '菜单缺 gateway')
+  assert.ok(/host\.state\.focusedSessionProfile\.get\(\)/.test(src), '未读会话所属 profile')
+  // 裸请求（无 pin）必须带 profile，否则落 launch profile 的辅助路由
+  assert.ok(/Object\.assign\(req, profileScope\(/.test(src), '增强裸请求缺 profile')
+  assert.ok(/\.\.\.profileScope\(host\.state\.focusedSessionProfile\.get\(\)\)/.test(src), '修复请求缺 profile')
+  // 本次 pin 绑会话
+  assert.ok(/setOncePin\(\{ provider, model, sessionId: menuTarget\.sessionId \}\)/.test(src), '本次 pin 未绑定会话')
+  // 跨窗口同步
+  assert.ok(/addEventListener\?\.\(window, 'storage'/.test(src), '缺 storage 跨窗口同步')
+  // 取消要传 isCancelled
+  assert.ok(/onRetry, \(\) => seq !== st\.seq\)/.test(src), '重试未接取消信号')
+})
+
 test('R11e: 选模型不关菜单；默认开时选模型即改默认；状态行默认优先', () => {
   const fs = process.getBuiltinModule('fs')
   const src = fs.readFileSync(new URL('../desktop/plugin.js', import.meta.url), 'utf8')
