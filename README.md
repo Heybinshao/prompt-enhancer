@@ -1,6 +1,6 @@
 # Prompt Enhancer for Hermes
 
-![仓库版本](https://img.shields.io/badge/仓库-v1.9.4-blue) ![官方目录](https://img.shields.io/badge/官方目录-v1.6.1-lightgrey) ![Hermes](https://img.shields.io/badge/Hermes-%E2%89%A5%200.21.6-informational)
+![仓库版本](https://img.shields.io/badge/仓库-v1.9.5-blue) ![官方目录](https://img.shields.io/badge/官方目录-v1.6.1-lightgrey) ![Hermes](https://img.shields.io/badge/Hermes-%E2%89%A5%200.21.6-informational)
 
 【Hermes 桌面端插件】输入框里的 ✨ 按钮：先把草稿的错别字修干净，再改写成结构化完整提示词。en / 简中 / 繁體。
 
@@ -13,7 +13,7 @@
 | 来源 | 版本 | 点一下会做什么 | ⌘ 选模型 | 升级方式 |
 |---|---|---|---|---|
 | 官方插件目录<br>`hermes plugins install prompt-enhancer` | **1.6.1**<br>（1.7.1 的 bump 在审核：[#145027](https://github.com/NousResearch/hermes-agent/pull/145027)） | 直接增强，没有修复步骤 | ✗ | `hermes plugins update prompt-enhancer` |
-| 本仓库 main<br>Git 安装 ／ 手动放置 | **1.9.4** | 先修复、再增强 | ✓ | 重装 + 勾「强制重装」 |
+| 本仓库 main<br>Git 安装 ／ 手动放置 | **1.9.5** | 先修复、再增强 | ✓ | 重装 + 勾「强制重装」 |
 
 一句话记住差别：**目录条目钉在某个已评审的 commit 上，所以永远慢一截**。下文中标 `〔1.7〕`〔1.8〕的功能，目录用户要等对应 bump 合并才拿得到。
 
@@ -31,7 +31,8 @@
 - **1.9.1**：菜单文案定稿；`恢复默认` 常驻置灰；隐藏目录自带的「添加自定义模型 / 编辑模型」两行
 - **1.9.2**：未固定时状态行显示实际主模型名
 - **1.9.3**：状态行拆成两行——标题（默认主模型 / 自定义模型）+ 模型名
-- **1.9.4**：把「不支持固定」改成「自定义暂不可用」——原来那句容易被读成主模型有问题
+- **1.9.4**：措辞修正
+- **1.9.5**：UI 只保留两态（默认主模型 / 自定义模型）；宿主限制彻底退出界面，只在代码里静默处理
 
 > 目录实际版本以插件卡片显示为准；本页写于 2026-10-28。
 
@@ -95,12 +96,7 @@
 - 固定是**设置**，不是一次性选择：插件重载、Hermes 重启都还在。
 - 菜单里只留模型本身：目录自带的「添加自定义模型 / 编辑模型」两行在这个菜单里被隐藏（它们属于输入框的模型选择器）。
 
-**菜单里选的模型，什么时候会不生效？**
-
-插件调模型只能走 Hermes 本体提供的那一条通道，而「指定用哪个模型」得通道本身支持。目前 Hermes 还没开放这个能力（上游 [#118430](https://github.com/NousResearch/hermes-agent/pull/118430) 在等评审）。
-
-- **没开放时**：菜单照常能选、选择也记得住，但点下去会**用主模型**跑，并提示一次。Hermes 更新后自动生效，插件不用重装。
-- **现在就想固定模型**：改下面的 `config.yaml`——这条设置跟 Hermes 版本无关，一直可用。
+> 自定义模型需要 Hermes 支持（上游 [#118430](https://github.com/NousResearch/hermes-agent/pull/118430)）。合入前这条设置会保存、但实际仍走主模型；合入后自动生效，插件不用改。
 
 **高级：两步想用不同模型**（修字用快模型、重写用强模型）——在 `config.yaml` 里分别配：
 

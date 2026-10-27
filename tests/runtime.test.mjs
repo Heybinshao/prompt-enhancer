@@ -173,7 +173,7 @@ test('T8: 宿主契约拒收 → 剥掉 pin 重发裸请求，并记住本次运
   assert.equal(calls[1].provider, undefined)
   assert.equal(calls[1].model, undefined)
   assert.equal(calls[1].session_id, undefined, '降级请求必须连 session_id 一起去掉')
-  assert.equal(T.snapshotPin().unsupported, true)
+  assert.ok(T.getPinned().enabled, '固定记录仍在（只是这次回落）')
   assert.equal(T.effectivePin(), null, '降级后不得再宣称在用 pin')
 })
 

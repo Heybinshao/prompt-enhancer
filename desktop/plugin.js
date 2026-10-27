@@ -192,7 +192,6 @@ const LOCALES = {
     tip: { idle: 'Enhance prompt', repairing: 'Fixing typos…', enhancing: 'Enhancing…', retrying: 'Rate limited — retrying…', repaired: 'Input fixed — click to revert', revert: 'Revert to original' },
     menu: {
       statusMainTitle: 'Current: default main model',
-      statusMainTitleUnsupported: 'Current: default main model (custom model unavailable)',
       statusPinTitle: 'Current: custom model',
       reset: 'Reset to default'
     },
@@ -209,7 +208,6 @@ const LOCALES = {
       emptyDraft: 'Composer is empty — nothing to enhance',
       repairNoChange: 'No typos found — nothing to fix',
       empty: 'Enhancement came back empty',
-      pinUnsupported: "This Hermes build can't switch models yet — the main model was used",
       failed: (m) => `Enhance failed: ${m}`
     }
   },
@@ -217,7 +215,6 @@ const LOCALES = {
     tip: { idle: '增强提示词', repairing: '修复输入中…', enhancing: '增强中…', retrying: '限流重试中…', repaired: '已修复输入 · 恢复原文', revert: '恢复原文' },
     menu: {
       statusMainTitle: '当前增强：默认主模型',
-      statusMainTitleUnsupported: '当前增强：默认主模型（自定义暂不可用）',
       statusPinTitle: '当前增强：自定义模型',
       reset: '恢复默认'
     },
@@ -234,7 +231,6 @@ const LOCALES = {
       emptyDraft: '输入框为空，没有可增强的内容',
       repairNoChange: '未发现需要修复的内容',
       empty: '增强结果为空',
-      pinUnsupported: '这一版 Hermes 还不能换模型，本次用的主模型',
       failed: (m) => `增强失败：${m}`
     }
   },
@@ -242,7 +238,6 @@ const LOCALES = {
     tip: { idle: '增強提示詞', repairing: '修復輸入中…', enhancing: '增強中…', retrying: '限流重試中…', repaired: '已修復輸入 · 恢復原文', revert: '恢復原文' },
     menu: {
       statusMainTitle: '當前增強：預設主模型',
-      statusMainTitleUnsupported: '當前增強：預設主模型（自訂暫不可用）',
       statusPinTitle: '當前增強：自訂模型',
       reset: '恢復預設'
     },
@@ -259,7 +254,6 @@ const LOCALES = {
       emptyDraft: '輸入框為空，沒有可增強的內容',
       repairNoChange: '未發現需要修復的內容',
       empty: '增強結果為空',
-      pinUnsupported: '這一版 Hermes 還不能換模型，本次用的主模型',
       failed: (m) => `增強失敗：${m}`
     }
   }
@@ -313,7 +307,7 @@ function pinComplete(pin) {
 }
 
 function snapshotPin() {
-  return { pinned: pinnedModel, unsupported: hostRejectsPin }
+  return { pinned: pinnedModel }
 }
 
 function emitPin() {
@@ -424,7 +418,10 @@ async function callGatewayWithRetry(gw, req, onRetry, isCancelled) {
         if (wasPinned) {
           hostRejectsPin = true
           emitPin()
-          tNotify('info', 'notify.pinUnsupported')
+          // No user-facing copy: the product has two states (main / custom).
+          // Until the host accepts the field, the call quietly runs on the main
+          // model instead of turning a pick into an error dialog.
+          console.error('[prompt-enhancer] host rejects llm.oneshot provider/model — retrying bare')
         } else {
           // Older hosts predate `profile` on this method: drop it and stay on
           // the launch profile instead of failing the click.
@@ -940,14 +937,11 @@ function EnhanceButton() {
   }
 
   // Two lines, one fact each: WHAT the button follows, and WHICH model that is.
-  // When the host refuses the pin, what actually runs is the main model — so say
-  // that, and let the title admit the custom pick could not be applied.
+  // Two states only — main model or a custom one. Host-side plumbing is not the
+  // user's problem and never shows up here.
   const isPinned = pinComplete(pin.pinned)
-  const showsPin = isPinned && !pin.unsupported
-  const statusTitle = pin.unsupported
-    ? t('menu.statusMainTitleUnsupported')
-    : isPinned ? t('menu.statusPinTitle') : t('menu.statusMainTitle')
-  const statusValue = showsPin ? pinLabel(pin.pinned) : (mainModel || '—')
+  const statusTitle = isPinned ? t('menu.statusPinTitle') : t('menu.statusMainTitle')
+  const statusValue = isPinned ? pinLabel(pin.pinned) : (mainModel || '—')
 
   return jsx(DropdownMenu, {
     open: menuOpen,
