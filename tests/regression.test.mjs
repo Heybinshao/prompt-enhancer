@@ -252,13 +252,15 @@ test('R20: 多 profile 接线——菜单按会话 profile 拉、裸请求带 pr
   assert.ok(/onRetry, \(\) => seq !== st\.seq\)/.test(src), '重试未接取消信号')
 })
 
-test('R22: 未固定时状态行带出默认主模型名', () => {
+test('R22: 状态行两行——标题说跟随谁，第二行说模型名', () => {
   const fs = process.getBuiltinModule('fs')
   const src = fs.readFileSync(new URL('../desktop/plugin.js', import.meta.url), 'utf8')
-  assert.ok(/statusMain: \(m\) => \(m \?/.test(src), 'statusMain 必须接收模型名')
-  assert.ok(/host\.state\?\.model\?\.get\?\.\(\)/.test(src), '未订阅 host.state.model')
+  assert.ok(/statusMainTitle: '当前增强：默认主模型'/.test(src), '缺「默认主模型」标题')
+  assert.ok(/statusPinTitle: '当前增强：自定义模型'/.test(src), '缺「自定义模型」标题')
+  assert.ok(/statusMainTitleUnsupported:/.test(src), '缺「本机不支持」标题')
+  assert.ok(/host\.state\?\.model\?\.get\?\.\(\)/.test(src), '未读 host.state.model')
   assert.ok(/host\.state\?\.model\?\.listen\?\./.test(src), '缺主模型变化订阅')
-  assert.ok(/t\('menu\.statusMain', mainModel\)/.test(src), '状态行未传主模型名')
+  assert.ok(/children: statusTitle/.test(src) && /children: statusValue/.test(src), '状态行未渲染成两行')
 })
 
 test('R11e: 选模型即固定（菜单不关），状态行只有固定/未固定两态', () => {
@@ -271,9 +273,11 @@ test('R11e: 选模型即固定（菜单不关），状态行只有固定/未固�
   const body = src.slice(at, at + 400)
   assert.ok(/setPinnedModel\(\{ enabled: true, provider, model \}\)/.test(body), '选模型必须落成固定记录')
   assert.ok(!/oncePin/.test(src), '「本次」记录必须彻底删除')
-  const s2 = src.indexOf('const statusLine =')
-  const sb = src.slice(s2, s2 + 300)
-  assert.ok(/pinComplete\(pin\.pinned\)/.test(sb), '状态行必须读固定记录')
+  const s2 = src.indexOf('const isPinned = pinComplete(pin.pinned)')
+  assert.ok(s2 > 0, '状态行必须读固定记录')
+  const sb = src.slice(s2, s2 + 400)
+  assert.ok(/showsPin \? pinLabel\(pin\.pinned\)/.test(sb), '已固定时第二行显示自定义模型名')
+  assert.ok(/mainModel \|\| '—'/.test(sb), '未固定时第二行显示主模型名')
   assert.ok(!/statusOnce/.test(src), '状态行不得再有「本次」')
 })
 

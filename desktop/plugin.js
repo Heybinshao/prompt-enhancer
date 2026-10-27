@@ -191,9 +191,9 @@ const LOCALES = {
   en: {
     tip: { idle: 'Enhance prompt', repairing: 'Fixing typos…', enhancing: 'Enhancing…', retrying: 'Rate limited — retrying…', repaired: 'Input fixed — click to revert', revert: 'Revert to original' },
     menu: {
-      statusMain: (m) => (m ? `Current model: default (${m})` : 'Current model: default'),
-      statusDefault: (m) => `Current model: ${m}`,
-      statusUnsupported: "This Hermes build can't switch models — the main model is used",
+      statusMainTitle: 'Current: default main model',
+      statusMainTitleUnsupported: 'Current: default main model (this build cannot pin)',
+      statusPinTitle: 'Current: custom model',
       reset: 'Reset to default'
     },
     notify: {
@@ -216,9 +216,9 @@ const LOCALES = {
   zh: {
     tip: { idle: '增强提示词', repairing: '修复输入中…', enhancing: '增强中…', retrying: '限流重试中…', repaired: '已修复输入 · 恢复原文', revert: '恢复原文' },
     menu: {
-      statusMain: (m) => (m ? `当前增强模型：默认主模型（${m}）` : '当前增强模型：默认主模型'),
-      statusDefault: (m) => `当前增强模型：${m}`,
-      statusUnsupported: '这一版 Hermes 还不能换模型，已用主模型',
+      statusMainTitle: '当前增强：默认主模型',
+      statusMainTitleUnsupported: '当前增强：默认主模型（本机不支持自定义）',
+      statusPinTitle: '当前增强：自定义模型',
       reset: '恢复默认'
     },
     notify: {
@@ -241,9 +241,9 @@ const LOCALES = {
   'zh-hant': {
     tip: { idle: '增強提示詞', repairing: '修復輸入中…', enhancing: '增強中…', retrying: '限流重試中…', repaired: '已修復輸入 · 恢復原文', revert: '恢復原文' },
     menu: {
-      statusMain: (m) => (m ? `當前增強模型：預設主模型（${m}）` : '當前增強模型：預設主模型'),
-      statusDefault: (m) => `當前增強模型：${m}`,
-      statusUnsupported: '這一版 Hermes 還不能換模型，已用主模型',
+      statusMainTitle: '當前增強：預設主模型',
+      statusMainTitleUnsupported: '當前增強：預設主模型（本機不支援自訂）',
+      statusPinTitle: '當前增強：自訂模型',
       reset: '恢復預設'
     },
     notify: {
@@ -939,11 +939,15 @@ function EnhanceButton() {
     setOptions: () => {}
   }
 
-  const statusLine = pin.unsupported
-    ? t('menu.statusUnsupported')
-    : pinComplete(pin.pinned)
-      ? t('menu.statusDefault', pinLabel(pin.pinned))
-      : t('menu.statusMain', mainModel)
+  // Two lines, one fact each: WHAT the button follows, and WHICH model that is.
+  // When the host refuses the pin, what actually runs is the main model — so say
+  // that, and let the title admit the custom pick could not be applied.
+  const isPinned = pinComplete(pin.pinned)
+  const showsPin = isPinned && !pin.unsupported
+  const statusTitle = pin.unsupported
+    ? t('menu.statusMainTitleUnsupported')
+    : isPinned ? t('menu.statusPinTitle') : t('menu.statusMainTitle')
+  const statusValue = showsPin ? pinLabel(pin.pinned) : (mainModel || '—')
 
   return jsx(DropdownMenu, {
     open: menuOpen,
@@ -1035,11 +1039,27 @@ function EnhanceButton() {
                 disabled: true,
                 onSelect: (e) => e.preventDefault(),
                 children: jsx('span', {
-                  style: {
-                    color: 'var(--ui-text-tertiary)', display: 'block', fontSize: '0.68rem',
-                    minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
-                  },
-                  children: statusLine
+                  style: { display: 'block', minWidth: 0 },
+                  children: [
+                    jsx('span', {
+                      key: 'title',
+                      style: {
+                        color: 'var(--ui-text-tertiary)', display: 'block', fontSize: '0.68rem',
+                        minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
+                      },
+                      children: statusTitle
+                    }),
+                    jsx('span', {
+                      key: 'value',
+                      style: {
+                        color: 'var(--ui-text-secondary, var(--ui-text-tertiary))',
+                        display: 'block', fontSize: '0.62rem',
+                        fontFamily: 'var(--dt-font-mono, ui-monospace, SFMono-Regular, monospace)',
+                        minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
+                      },
+                      children: statusValue
+                    })
+                  ]
                 })
               }),
               // Always present, greyed out when nothing is pinned: a control the
