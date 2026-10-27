@@ -1,6 +1,6 @@
 # Prompt Enhancer for Hermes
 
-![仓库版本](https://img.shields.io/badge/仓库-v1.8.2-blue) ![官方目录](https://img.shields.io/badge/官方目录-v1.6.1-lightgrey) ![Hermes](https://img.shields.io/badge/Hermes-%E2%89%A5%200.21.6-informational)
+![仓库版本](https://img.shields.io/badge/仓库-v1.8.3-blue) ![官方目录](https://img.shields.io/badge/官方目录-v1.6.1-lightgrey) ![Hermes](https://img.shields.io/badge/Hermes-%E2%89%A5%200.21.6-informational)
 
 【Hermes 桌面端插件】输入框里的 ✨ 按钮：先把草稿的错别字修干净，再改写成结构化完整提示词。en / 简中 / 繁體。
 
@@ -13,7 +13,7 @@
 | 来源 | 版本 | 点一下会做什么 | ⌘ 选模型 | 升级方式 |
 |---|---|---|---|---|
 | 官方插件目录<br>`hermes plugins install prompt-enhancer` | **1.6.1**<br>（1.7.1 的 bump 在审核：[#145027](https://github.com/NousResearch/hermes-agent/pull/145027)） | 直接增强，没有修复步骤 | ✗ | `hermes plugins update prompt-enhancer` |
-| 本仓库 main<br>Git 安装 ／ 手动放置 | **1.8.2** | 先修复、再增强 | ✓ | 重装 + 勾「强制重装」 |
+| 本仓库 main<br>Git 安装 ／ 手动放置 | **1.8.3** | 先修复、再增强 | ✓ | 重装 + 勾「强制重装」 |
 
 一句话记住差别：**目录条目钉在某个已评审的 commit 上，所以永远慢一截**。下文中标 `〔1.7〕`〔1.8〕的功能，目录用户要等对应 bump 合并才拿得到。
 
@@ -23,7 +23,8 @@
 - **1.7.0 / 1.7.1**：拆成「修复 → 增强」两次独立调用，修复结果写回输入框可见；⌥ 点击只修复
 - **1.8.0**（本仓库）：⌘ 点击选增强模型（本次 / 默认），菜单内一条「恢复默认」
 - **1.8.1**：多 profile 路由修正（模型目录按会话所属 profile 拉，裸请求也落在该 profile）、输出上限按输入长度自适应、取消后不再重试、跨窗口同步默认值
-- **1.8.2**：菜单里提前说明「固定模型需宿主支持」，按钮补 `aria-haspopup/aria-expanded`，新草稿不再误清本次选择
+- **1.8.2**：菜单里提前说明「换模型要等 Hermes 更新」（1.8.3 把这句改成大白话），按钮补 `aria-haspopup/aria-expanded`，新草稿不再误清本次选择
+- **1.8.3**：提示文案去掉「宿主 / 回落 / 辅助路由」这类黑话，统一说「还不能换模型，用默认模型」
 
 > 目录实际版本以插件卡片显示为准；本页写于 2026-10-28。
 
@@ -49,7 +50,7 @@
 
 **装完按钮没出现**：几乎都是没打开。包管理安装（目录 / Git）的桌面副本默认是关的——不加载、也不报错，只是静默不出现，去 **技能与工具 → 插件 → Prompt Enhancer** 点亮。
 
-> ⚠️ 插件入口在仓库的 `desktop/` 子目录里，别把整个仓库 clone 进 `~/.hermes/desktop-plugins/`——多出一层目录，宿主就找不到入口文件了。
+> ⚠️ 插件入口在仓库的 `desktop/` 子目录里，别把整个仓库 clone 进 `~/.hermes/desktop-plugins/`——多出一层目录，Hermes 就找不到入口文件了。
 
 **卸载**：在「技能与工具 → 插件」里关掉开关；彻底删是 `hermes plugins remove prompt-enhancer` + 删 `~/.hermes/desktop-plugins/prompt-enhancer/`（两个地方都要清，只删后者会留下后端条目）。
 
@@ -82,10 +83,15 @@
 
 - 选完菜单**不关**——切作用域往往就是同一个动作的后半截；Esc 或点菜单外面才收起。
 - **只影响增强那一步**：修复仍走 `auxiliary.prompt_repair`（拿贵模型修错字没有收益）。
-- **恢复默认**：一条清掉所有自定义记录，回到裸请求（跟随 `auxiliary.prompt_enhancement`，没配则辅助路由 auto）。没有记录时这一行不出现。
+- **恢复默认**：一条清掉所有自定义记录，回到「不指定模型」——增强用 `config.yaml` 里配的那个（见下），没配就用默认模型。没有记录时这一行不出现。
 - 默认值存在插件自己的存储里，插件更新/重启后仍在；「只这一次」只在内存里，插件重载即失效。
 
-**降级**：宿主必须能接 `llm.oneshot` 的 `provider` / `model`（上游 [#118430](https://github.com/NousResearch/hermes-agent/pull/118430)）。没有这条通道的宿主机上，菜单照常打开、选择照常记住，但增强会**自动退回默认路由**并提示一次——不会变成一次报错点击；宿主更新后，记下的默认模型自动开始生效。
+**菜单里选的模型，什么时候会不生效？**
+
+插件调模型只能走 Hermes 本体提供的那一条通道，而「指定用哪个模型」得通道本身支持。目前 Hermes 还没开放这个能力（上游 [#118430](https://github.com/NousResearch/hermes-agent/pull/118430) 在等评审）。
+
+- **没开放时**：菜单照常能选、选择也记得住，但点增强会**用默认模型**跑，并提示一次。Hermes 更新后自动生效，插件不用重装。
+- **现在就想固定增强用哪个模型**：改下面的 `config.yaml`——这条设置跟 Hermes 版本无关，一直可用。
 
 **不想开菜单**：直接在 `config.yaml` 给两步分别指定（`prompt_enhancement` 一直有，`prompt_repair` 是〔1.7〕起）：
 

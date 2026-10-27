@@ -200,8 +200,8 @@ const LOCALES = {
       statusMain: 'Follows the default route (no pin)',
       statusOnce: (m) => `This run (enhance only): ${m}`,
       statusDefault: (m) => `Default (enhance only): ${m}`,
-      statusUnsupported: 'This Hermes build cannot pin a model — using the auxiliary route',
-      hostNote: 'Pinning needs host support; falls back automatically',
+      statusUnsupported: "This Hermes build can't switch models — the default is used",
+      hostNote: "Switching models needs a newer Hermes; until then the default is used",
       reset: 'Reset to default'
     },
     notify: {
@@ -217,7 +217,7 @@ const LOCALES = {
       emptyDraft: 'Composer is empty — nothing to enhance',
       repairNoChange: 'No typos found — nothing to fix',
       empty: 'Enhancement came back empty',
-      pinUnsupported: 'This Hermes build cannot pin a model yet — this run used the default route',
+      pinUnsupported: "This Hermes build can't switch models yet — this run used the default",
       pickFirst: 'Pick a model first, then turn the default on',
       failed: (m) => `Enhance failed: ${m}`
     }
@@ -231,8 +231,8 @@ const LOCALES = {
       statusMain: '跟随默认路由（未固定）',
       statusOnce: (m) => `本次（仅增强）：${m}`,
       statusDefault: (m) => `默认（仅增强）：${m}`,
-      statusUnsupported: '当前 Hermes 版本不支持固定模型，已走辅助路由',
-      hostNote: '固定模型需宿主支持；不支持时自动回落',
+      statusUnsupported: '这一版 Hermes 还不能换模型，已用默认模型',
+      hostNote: '换模型要等 Hermes 更新；在那之前用默认模型',
       reset: '恢复默认'
     },
     notify: {
@@ -248,7 +248,7 @@ const LOCALES = {
       emptyDraft: '输入框为空，没有可增强的内容',
       repairNoChange: '未发现需要修复的内容',
       empty: '增强结果为空',
-      pinUnsupported: '当前 Hermes 版本还不支持指定增强模型，本次已走默认路由',
+      pinUnsupported: '这一版 Hermes 还不能换增强模型，本次用的默认模型',
       pickFirst: '先选一个模型，再把默认打开',
       failed: (m) => `增强失败：${m}`
     }
@@ -262,8 +262,8 @@ const LOCALES = {
       statusMain: '跟隨預設路由（未固定）',
       statusOnce: (m) => `本次（僅增強）：${m}`,
       statusDefault: (m) => `預設（僅增強）：${m}`,
-      statusUnsupported: '目前 Hermes 版本不支援固定模型，已走輔助路由',
-      hostNote: '固定模型需宿主支援；不支援時自動回落',
+      statusUnsupported: '這一版 Hermes 還不能換模型，已用預設模型',
+      hostNote: '換模型要等 Hermes 更新；在那之前用預設模型',
       reset: '恢復預設'
     },
     notify: {
@@ -279,7 +279,7 @@ const LOCALES = {
       emptyDraft: '輸入框為空，沒有可增強的內容',
       repairNoChange: '未發現需要修復的內容',
       empty: '增強結果為空',
-      pinUnsupported: '目前 Hermes 版本還不支援指定增強模型，本次已走預設路由',
+      pinUnsupported: '這一版 Hermes 還不能換增強模型，本次用的預設模型',
       pickFirst: '先選一個模型，再把預設打開',
       failed: (m) => `增強失敗：${m}`
     }
