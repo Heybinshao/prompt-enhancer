@@ -208,6 +208,7 @@ const LOCALES = {
       emptyDraft: 'Composer is empty — nothing to enhance',
       repairNoChange: 'No typos found — nothing to fix',
       empty: 'Enhancement came back empty',
+      saveFailed: 'Could not save the model setting (backend half missing?)',
       failed: (m) => `Enhance failed: ${m}`
     }
   },
@@ -231,6 +232,7 @@ const LOCALES = {
       emptyDraft: '输入框为空，没有可增强的内容',
       repairNoChange: '未发现需要修复的内容',
       empty: '增强结果为空',
+      saveFailed: '模型设置没保存成功（后端半边未安装？）',
       failed: (m) => `增强失败：${m}`
     }
   },
@@ -254,6 +256,7 @@ const LOCALES = {
       emptyDraft: '輸入框為空，沒有可增強的內容',
       repairNoChange: '未發現需要修復的內容',
       empty: '增強結果為空',
+      saveFailed: '模型設定沒儲存成功（後端半邊未安裝？）',
       failed: (m) => `增強失敗：${m}`
     }
   }
@@ -284,7 +287,6 @@ function tNotify(kind, key, ...args) {
 // shippable: on an old host the picker is inert, never broken.
 let storageApi = null
 let pinnedModel = { enabled: false, provider: '', model: '' }
-let hostRejectsPin = false
 let hostRejectsProfile = false
 const pinListeners = new Set()
 const PIN_KEY = 'enhanceModel'
@@ -324,12 +326,53 @@ function setPinnedModel(patch) {
   emitPin()
 }
 
-// The model this button will actually ask for: the pinned one, else nothing
-// (which leaves both requests bare → the main model). A host that rejects the
-// pin parks this at null so the UI can't promise a route the call can't take.
-function effectivePin() {
-  if (hostRejectsPin) return null
-  return pinComplete(pinnedModel) ? { provider: pinnedModel.provider, model: pinnedModel.model } : null
+// ── config bridge (backend half) ─────────────────────────────────────────
+// The model choice is a CONFIG write, not a request parameter: llm.oneshot has no
+// provider/model field, but auxiliary.<task>.{provider,model} is read on every
+// call. That makes the write immediate (no restart) and independent of host
+// version. A renderer cannot touch config.yaml, so the plugin's Python half does.
+let restApi = null
+// A desktop-only install (no dashboard/) can read/write nothing: keep the local
+// record instead of failing every pick.
+let keepLocalOnly = true
+
+async function persistModel(provider, model) {
+  if (typeof restApi !== 'function') return false
+  try {
+    await restApi('/model', {
+      method: 'POST',
+      body: provider && model ? { provider, model } : { clear: true }
+    })
+    return true
+  } catch (e) {
+    console.error('[prompt-enhancer] writing auxiliary model to config failed:', e)
+    return false
+  }
+}
+
+// Optimistic: the menu shows the pick at once; if the config write fails the
+// display is rolled back and the user is told, rather than keeping a promise the
+// routing cannot keep.
+async function saveModel(provider, model) {
+  const prev = { ...pinnedModel }
+  setPinnedModel({ enabled: Boolean(provider && model), provider: provider || '', model: model || '' })
+  const ok = await persistModel(provider, model)
+  if (!ok && !keepLocalOnly) {
+    pinnedModel = prev
+    emitPin()
+    tNotify('error', 'notify.saveFailed')
+  }
+}
+
+async function readPersistedModel() {
+  if (typeof restApi !== 'function') return null
+  try {
+    const res = await restApi('/model')
+    const task = res && res.tasks && res.tasks.prompt_enhancement
+    return task || null
+  } catch {
+    return null
+  }
 }
 
 function pinLabel(pin) {
@@ -413,25 +456,12 @@ async function callGatewayWithRetry(gw, req, onRetry, isCancelled) {
     try {
       return await gw.request('llm.oneshot', req, 180_000)
     } catch (e) {
-      if (isContractReject(e) && (req.provider || req.profile)) {
-        const wasPinned = Boolean(req.provider)
-        if (wasPinned) {
-          hostRejectsPin = true
-          emitPin()
-          // No user-facing copy: the product has two states (main / custom).
-          // Until the host accepts the field, the call quietly runs on the main
-          // model instead of turning a pick into an error dialog.
-          console.error('[prompt-enhancer] host rejects llm.oneshot provider/model — retrying bare')
-        } else {
-          // Older hosts predate `profile` on this method: drop it and stay on
-          // the launch profile instead of failing the click.
-          hostRejectsProfile = true
-          console.error('[prompt-enhancer] host rejects llm.oneshot profile — retrying unscoped')
-        }
+      if (isContractReject(e) && req.profile) {
+        // Older hosts predate `profile` on this method: drop it and stay on the
+        // launch profile instead of failing the click.
+        hostRejectsProfile = true
+        console.error('[prompt-enhancer] host rejects llm.oneshot profile — retrying unscoped')
         const bare = { ...req }
-        delete bare.provider
-        delete bare.model
-        delete bare.session_id
         delete bare.profile
         // The stored pick is kept: a host update later makes it work again.
         return callGatewayWithRetry(gw, bare, onRetry, isCancelled)
@@ -476,10 +506,8 @@ async function runRepair(c, sessionId, text, st, seq, onRetry) {
   }
   let res
   try {
-    // ONE model for the whole button: the repair step carries the same pick as
-    // the enhancement. Two steps, one choice — otherwise the user has to hold
-    // "this setting only affects half of what the button does" in their head.
-    const pin = effectivePin()
+    // Model routing lives in config.yaml (auxiliary.prompt_repair), written by the
+    // backend half — so the request itself stays bare and only names its profile.
     const req = {
       instructions: REPAIR_TEMPLATE,
       input: text,
@@ -489,13 +517,7 @@ async function runRepair(c, sessionId, text, st, seq, onRetry) {
       temperature: 0, // proofreading is not a creative task
       task: 'prompt_repair'
     }
-    if (pin) {
-      req.provider = pin.provider
-      req.model = pin.model
-      if (sessionId) req.session_id = sessionId
-    } else {
-      Object.assign(req, profileScope(host.state.focusedSessionProfile.get()))
-    }
+    Object.assign(req, profileScope(host.state.focusedSessionProfile.get()))
     res = await callGatewayWithRetry(gw, req, onRetry, () => seq !== st.seq)
   } catch (e) {
     console.error('[prompt-enhancer] repair failed (enhancing the original):', e)
@@ -597,13 +619,9 @@ async function runEnhance(btnEl, onPhase, onRetry) {
   if (!editor.isContentEditable) return tNotify('error', 'notify.notEditable')
   const st = editorState(editor)
   if (st.phase === 'enhancing' || st.phase === 'repairing') return
-  // Routing: no pick → the request goes out BARE (no session_id), so
-  // llm.oneshot's auto arm lands on the configured aux route rather than the
-  // live session's model. A pick (this-run first, then the saved default) sends
-  // provider/model — the resolver's highest-priority arm — plus the session id
-  // so the call stays inside this session's profile scope.
+  // Both steps go out BARE: the model comes from auxiliary.prompt_repair /
+  // prompt_enhancement (written by the backend half), not from request params.
   const sessionId = resolveSessionId(btnEl, () => host.state.activeSessionId.get())
-  const pin = effectivePin()
   const draftText = await c.getDraft(sessionId)
   const text = draftText ?? ''
   if (!text.trim()) {
@@ -658,14 +676,8 @@ async function runEnhance(btnEl, onPhase, onRetry) {
       // can pin a provider/model per step.
       task: 'prompt_enhancement'
     }
-    if (pin) {
-      req.provider = pin.provider
-      req.model = pin.model
-      if (sessionId) req.session_id = sessionId
-    } else {
-      // No pin → the aux route, but still the SESSION's profile, not the launch one.
-      Object.assign(req, profileScope(host.state.focusedSessionProfile.get()))
-    }
+    // Both steps follow the same auxiliary config; the request stays bare.
+    Object.assign(req, profileScope(host.state.focusedSessionProfile.get()))
     // host.request is hard-capped at the gateway default 30s
     // (DEFAULT_GATEWAY_REQUEST_TIMEOUT_MS) — LLM generation routinely exceeds
     // it. getGateway().request takes timeoutMs as its 3rd arg (client wait).
@@ -908,7 +920,7 @@ function EnhanceButton() {
   // The bubble carries the current STATE only: modifier hints and the pinned
   // model live in the menu (checkmark + status row) and the README. A tooltip
   // that doubles as a manual is exactly what we dropped.
-  const activePin = effectivePin()
+  const activePin = pinComplete(pin.pinned) ? pin.pinned : null
   const tip = phase === 'enhancing'
     ? (retrying ? t('tip.retrying') : t('tip.enhancing'))
     : phase === 'repairing'
@@ -931,7 +943,7 @@ function EnhanceButton() {
     // scope, so there is no second dimension to explain in the menu.
     select: (model, provider) => {
       suppressClose.current = true // stay open: the user may reconsider or unpin
-      setPinnedModel({ enabled: true, provider, model })
+      void saveModel(provider, model) // writes auxiliary.prompt_* via the backend half
     },
     setOptions: () => {}
   }
@@ -956,6 +968,18 @@ function EnhanceButton() {
         setMenuTarget({
           profile: host.state.focusedSessionProfile.get() || null,
           gateway: host.getGateway() ?? null
+        })
+        // config.yaml is the source of truth (it can be edited by hand or by
+        // Hermes' own auxiliary settings); mirror it into the display on open.
+        void readPersistedModel().then((task) => {
+          if (!task) return
+          const has = Boolean(task.provider && task.model)
+          const cur = pinnedModel
+          if (has && (cur.provider !== task.provider || cur.model !== task.model)) {
+            setPinnedModel({ enabled: true, provider: task.provider, model: task.model })
+          } else if (!has && cur.enabled) {
+            setPinnedModel({ enabled: false, provider: '', model: '' })
+          }
         })
         setMenuOpen(true)
       }
@@ -1064,7 +1088,7 @@ function EnhanceButton() {
                 disabled: !pinComplete(pin.pinned),
                 onSelect: (e) => {
                   e.preventDefault()
-                  setPinnedModel({ enabled: false, provider: '', model: '' })
+                  void saveModel('', '') // clears auxiliary.prompt_* → back to the main model
                 },
                 children: [
                   jsx(Codicon, { key: 'icon', name: 'close', size: '0.75rem' }),
@@ -1090,8 +1114,9 @@ export default {
     // `hermes.plugin.prompt-enhancer.enhanceModel`): it survives plugin reloads
     // and app updates, because it is a setting, not a run-scoped pick.
     storageApi = ctx.storage ?? null
+    restApi = typeof ctx.rest === 'function' ? ctx.rest : null
+    keepLocalOnly = restApi === null
     pinnedModel = loadPin()
-    hostRejectsPin = false // re-probe the host every load: an update may add the door
     hostRejectsProfile = false
     // Two windows share one localStorage but not one module: mirror the other
     // window's writes instead of showing a stale default there.
@@ -1113,6 +1138,7 @@ export default {
       removeSpinnerStyle()
       pinListeners.clear()
       storageApi = null
+      restApi = null
       ti18nStatic = null
     })
     console.error(`[prompt-enhancer] registered (pure-sdk) into ${COMPOSER_AREAS.actions}`)
