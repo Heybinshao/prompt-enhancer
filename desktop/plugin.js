@@ -195,12 +195,12 @@ const LOCALES = {
       default: 'Use by default',
       off: 'Off',
       on: 'On',
-      statusMain: 'Using the default model',
+      statusMain: 'Using the main model',
       statusOnce: (m) => `This run: ${m}`,
-      statusDefault: (m) => `Default: ${m}`,
-      statusUnsupported: "This Hermes build can't switch models — the default is used",
-      hostNote: "Switching models needs a newer Hermes; until then the default is used",
-      reset: 'Reset to default'
+      statusDefault: (m) => `Pinned: ${m}`,
+      statusUnsupported: "This Hermes build can't switch models — the main model is used",
+      hostNote: "Switching models needs a newer Hermes; until then the main model is used",
+      reset: 'Unpin'
     },
     notify: {
       noEditor: 'Composer not found',
@@ -215,8 +215,8 @@ const LOCALES = {
       emptyDraft: 'Composer is empty — nothing to enhance',
       repairNoChange: 'No typos found — nothing to fix',
       empty: 'Enhancement came back empty',
-      pinUnsupported: "This Hermes build can't switch models yet — this run used the default",
-      pickFirst: 'Pick a model first, then turn the default on',
+      pinUnsupported: "This Hermes build can't switch models yet — the main model was used",
+      pickFirst: 'Pick a model first, then turn 「Always use」 on',
       failed: (m) => `Enhance failed: ${m}`
     }
   },
@@ -226,12 +226,12 @@ const LOCALES = {
       default: '之后都用这个模型',
       off: '关',
       on: '开',
-      statusMain: '用默认模型（未指定）',
+      statusMain: '用主模型（未固定）',
       statusOnce: (m) => `本次：${m}`,
-      statusDefault: (m) => `默认：${m}`,
-      statusUnsupported: '这一版 Hermes 还不能换模型，已用默认模型',
-      hostNote: '换模型要等 Hermes 更新；在那之前用默认模型',
-      reset: '恢复默认'
+      statusDefault: (m) => `固定：${m}`,
+      statusUnsupported: '这一版 Hermes 还不能换模型，已用主模型',
+      hostNote: '换模型要等 Hermes 更新；在那之前用主模型',
+      reset: '取消固定'
     },
     notify: {
       noEditor: '未找到输入框',
@@ -246,8 +246,8 @@ const LOCALES = {
       emptyDraft: '输入框为空，没有可增强的内容',
       repairNoChange: '未发现需要修复的内容',
       empty: '增强结果为空',
-      pinUnsupported: '这一版 Hermes 还不能换增强模型，本次用的默认模型',
-      pickFirst: '先选一个模型，再把默认打开',
+      pinUnsupported: '这一版 Hermes 还不能换模型，本次用的主模型',
+      pickFirst: '先选一个模型，再打开「之后都用」',
       failed: (m) => `增强失败：${m}`
     }
   },
@@ -257,12 +257,12 @@ const LOCALES = {
       default: '之後都用這個模型',
       off: '關',
       on: '開',
-      statusMain: '用預設模型（未指定）',
+      statusMain: '用主模型（未固定）',
       statusOnce: (m) => `本次：${m}`,
-      statusDefault: (m) => `預設：${m}`,
-      statusUnsupported: '這一版 Hermes 還不能換模型，已用預設模型',
-      hostNote: '換模型要等 Hermes 更新；在那之前用預設模型',
-      reset: '恢復預設'
+      statusDefault: (m) => `固定：${m}`,
+      statusUnsupported: '這一版 Hermes 還不能換模型，已用主模型',
+      hostNote: '換模型要等 Hermes 更新；在那之前用主模型',
+      reset: '取消固定'
     },
     notify: {
       noEditor: '未找到輸入框',
@@ -277,8 +277,8 @@ const LOCALES = {
       emptyDraft: '輸入框為空，沒有可增強的內容',
       repairNoChange: '未發現需要修復的內容',
       empty: '增強結果為空',
-      pinUnsupported: '這一版 Hermes 還不能換增強模型，本次用的預設模型',
-      pickFirst: '先選一個模型，再把預設打開',
+      pinUnsupported: '這一版 Hermes 還不能換模型，本次用的主模型',
+      pickFirst: '先選一個模型，再打開「之後都用」',
       failed: (m) => `增強失敗：${m}`
     }
   }
