@@ -178,27 +178,78 @@ test('R9: chip token 走草稿文本保护，模板含 token 保真约束', () =
 // write-back layer was deleted with the catalog review #121246 — chip
 // hydration is now entirely the official setDraft's job. sdk-only.test.mjs
 // pins the new contract.
-// [v1.6.1] 自定义模型（M2）已移除。宿主契约 LlmOneshotParams
-// (tui_gateway/contracts/sessions.py) 里没有 provider/model 字段，带上去只会让
-// 开关一开就 4000 out-of-sync —— 目录里不该留着这个功能。本组断言把「已移除」
-// 钉死，防止回退：要恢复得等上游 #118430 合并后再整块加回。
-test('R11: 自定义模型（M2）已移除——无选择器 / 无 provider·model 透传', () => {
+// [v1.8.0] 模型 pin（⌘+点击）回归。v1.6.1 曾因宿主契约没有 provider/model
+// 整块删掉（e5cc952）；现在加回，但三条不变量必须同时成立——裸请求路径原样、
+// pin 只在完整记录上生效、宿主拒收时降级成裸请求而不是把一次点击变成报错。
+test('R11: 模型 pin 存在，透传被 if(pin) 包住（未选模型时请求与 v1.7.1 一致）', () => {
   const fs = process.getBuiltinModule('fs')
   const src = fs.readFileSync(new URL('../desktop/plugin.js', import.meta.url), 'utf8')
-  const banned = [
-    'ModelCatalogMenu', 'ModelMenuCloseContext', 'SegmentedControl', 'DropdownMenu',
-    'setModelPin', 'effectivePin', 'modelPin', 'pinListeners', 'storageApi',
-    'menu.custom', 'tip.pinned', 'metaGesture'
+  const need = [
+    'ModelCatalogMenu', 'ModelMenuCloseContext', 'SegmentedControl', 'metaGesture',
+    'setOncePin', 'setDefaultPin', 'effectivePin', 'enhanceModel'
   ]
-  const hits = banned.filter((b) => src.includes(b))
-  assert.equal(hits.length, 0, 'M2 残留: ' + hits.join(', '))
-  assert.ok(!/req\.provider\s*=/.test(src), '不再向 llm.oneshot 传 provider')
-  assert.ok(!/req\.model\s*=/.test(src), '不再向 llm.oneshot 传 model')
-  assert.ok(!/req\.session_id/.test(src), '请求保持裸发（不向 llm.oneshot 传 session_id）')
+  const missing = need.filter((n) => !src.includes(n))
+  assert.equal(missing.length, 0, '缺 pin 组件: ' + missing.join(', '))
+  // ⌘/Ctrl+点击只开菜单，不触发增强
+  assert.ok(/if \(e\?\.metaKey \|\| e\?\.ctrlKey\) return/.test(src), 'onClick 缺 ⌘ 早退')
+  const at = src.indexOf('\n    if (pin) {')
+  assert.ok(at > 0, '缺 pin 条件分支（裸请求必须原样）')
+  const body = src.slice(at, src.indexOf('\n    }', at))
+  assert.ok(/req\.provider = pin\.provider/.test(body), 'pin 分支缺 provider')
+  assert.ok(/req\.model = pin\.model/.test(body), 'pin 分支缺 model')
+  assert.ok(/req\.session_id = sessionId/.test(body), 'pin 分支缺 session_id（会话 profile 作用域）')
 })
 
-// R12 (v1.6.1 移除): pin 开关语义的纯函数镜像随 M2 一起删除——被镜像的
-// loadPin / setModelPin / effectivePin 已不存在，镜像没有对象可测。
+test('R11b: 宿主契约没有 provider/model 时降级为裸请求（不把点击变成 4000）', () => {
+  const fs = process.getBuiltinModule('fs')
+  const src = fs.readFileSync(new URL('../desktop/plugin.js', import.meta.url), 'utf8')
+  assert.ok(/function isContractReject\(/.test(src), '缺契约拒收识别')
+  assert.ok(/Extra inputs are not permitted/.test(src), '缺 extra=forbid 文案判据')
+  assert.ok(/delete bare\.provider/.test(src) && /delete bare\.model/.test(src), '缺降级剥字段')
+  assert.ok(/hostRejectsPin = true/.test(src), '降级后必须记住本次运行')
+  assert.ok(/tNotify\('info', 'notify\.pinUnsupported'\)/.test(src), '降级要给用户一句解释')
+})
+
+test('R11d: 一条「恢复默认」清掉本次+默认（不并列两个清除入口）', () => {
+  const fs = process.getBuiltinModule('fs')
+  const src = fs.readFileSync(new URL('../desktop/plugin.js', import.meta.url), 'utf8')
+  const at = src.indexOf("key: 'reset'")
+  assert.ok(at > 0, '缺「恢复默认」菜单项')
+  const body = src.slice(at, at + 600)
+  assert.ok(/setOncePin\(null\)/.test(body), '恢复默认必须清本次')
+  assert.ok(/setDefaultPin\(\{ enabled: false/.test(body), '恢复默认必须关默认')
+  assert.ok(/pin\.once \|\| pinComplete\(pin\.def\)/.test(src), '恢复默认只在有记录时出现')
+  assert.ok(!src.includes('clearOnce'), '旧的「清除本次选择」入口必须移除（避免两个清除控件）')
+})
+
+test('R11e: 选模型不关菜单；默认开时选模型即改默认；状态行默认优先', () => {
+  const fs = process.getBuiltinModule('fs')
+  const src = fs.readFileSync(new URL('../desktop/plugin.js', import.meta.url), 'utf8')
+  assert.ok(/suppressClose/.test(src), '缺 keep-open 标记')
+  assert.ok(/if \(suppressClose\.current\) \{/.test(src), '缺「吞掉选择后的关闭」分支')
+  const at = src.indexOf('select: (model, provider) => {')
+  assert.ok(at > 0, '缺 controller.select')
+  const body = src.slice(at, at + 700)
+  assert.ok(/pinComplete\(pin\.def\)/.test(body), '默认开时选模型必须走改默认分支')
+  assert.ok(/setDefaultPin\(\{ enabled: true, provider, model \}\)/.test(body), '默认开时选模型应直接改默认')
+  assert.ok(/setOncePin\(null\)/.test(body), '改默认时必须清掉本次（单记录）')
+  assert.ok(/if \(pin\.once\) setOncePin\(null\)/.test(src), '把本次提升为默认后必须清本次')
+  const s = src.indexOf('const statusLine =')
+  const sb = src.slice(s, s + 400)
+  assert.ok(sb.indexOf('pinComplete(pin.def)') < sb.indexOf('pin.once'), '状态行必须默认优先（否则开了默认还显示本次）')
+})
+
+test('R11c: 仅修复路径不跟随 pin（repair 仍走 prompt_repair 辅助路由）', () => {
+  const fs = process.getBuiltinModule('fs')
+  const src = fs.readFileSync(new URL('../desktop/plugin.js', import.meta.url), 'utf8')
+  const start = src.indexOf('async function runRepair(')
+  const next = src.indexOf('\nasync function ', start + 10)
+  const body = src.slice(start, next === -1 ? undefined : next)
+  assert.ok(!/effectivePin|req\.provider|req\.model/.test(body), '仅修复路径不得读取/透传 pin')
+  assert.ok(/task: 'prompt_repair'/.test(body), '仅修复路径必须留在 prompt_repair 任务上')
+})
+
+// R12 (v1.8.0 恢复为 R18/R19 的语义镜像): 被镜像的归一化与优先级逻辑见下。
 // ── v1.7.0 修复前置步骤：护栏纯函数镜像 ──
 // 与 plugin.js 的 repairDriftOk / chipsPreserved / cleanRepair 保持同步。
 const REPAIR_MAX_DRIFT_RATIO = 0.15
@@ -273,6 +324,41 @@ test('R17: ⌥ 点击只修复——有独立入口、不触发增强调用', ()
   assert.ok(!/prompt_enhancement/.test(body), '仅修复路径不得调用增强任务')
   assert.ok(!/SYSTEM_TEMPLATE/.test(body), '仅修复路径不得使用增强模板')
   assert.ok(/repairAndApply\(/.test(body), '仅修复路径必须复用同一套修复写回（含快照守卫）')
+})
+
+// ── v1.8.0 模型 pin 语义镜像（与 plugin.js 的 normalizePin / effectivePin /
+// consumeOnce 保持同步；plugin.js 改动这三处必须同步本文件并全量重跑） ──
+function normalizePinMirror(v) {
+  if (!v || typeof v !== 'object') return null
+  const provider = typeof v.provider === 'string' ? v.provider.trim() : ''
+  const model = typeof v.model === 'string' ? v.model.trim() : ''
+  if (!provider || !model) return null
+  return { enabled: v.enabled !== false, provider, model }
+}
+
+test('R18: 存储归一化——旧裸 {provider,model} 视为开启，半条记录丢弃', () => {
+  assert.equal(normalizePinMirror(null), null)
+  assert.equal(normalizePinMirror({ provider: 'p' }), null, '缺 model 的记录必须丢弃')
+  assert.deepEqual(normalizePinMirror({ provider: ' p ', model: 'm' }), { enabled: true, provider: 'p', model: 'm' })
+  assert.equal(normalizePinMirror({ enabled: false, provider: 'p', model: 'm' }).enabled, false)
+})
+
+test('R19: pin 优先级——本次 > 默认 > 无；半条记录不生效；消费后回默认', () => {
+  let once = null
+  let def = { enabled: false, provider: '', model: '' }
+  const complete = (p) => Boolean(p?.enabled && p.provider && p.model)
+  const effective = () => (once ?? (complete(def) ? { provider: def.provider, model: def.model } : null))
+  const consume = () => { once = null }
+
+  assert.equal(effective(), null, '没选过 → 裸请求')
+  def = { ...def, enabled: true }
+  assert.equal(effective(), null, '开关开了但没有模型 → 不生效')
+  def = { ...def, provider: 'p', model: 'm' }
+  assert.deepEqual(effective(), { provider: 'p', model: 'm' })
+  once = { provider: 'q', model: 'n' }
+  assert.deepEqual(effective(), { provider: 'q', model: 'n' }, '本次必须压过默认')
+  consume()
+  assert.deepEqual(effective(), { provider: 'p', model: 'm' }, '消费后回默认')
 })
 
 // ── 汇总 ──
