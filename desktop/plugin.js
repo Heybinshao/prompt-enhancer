@@ -201,6 +201,7 @@ const LOCALES = {
       statusOnce: (m) => `This run (enhance only): ${m}`,
       statusDefault: (m) => `Default (enhance only): ${m}`,
       statusUnsupported: 'This Hermes build cannot pin a model — using the auxiliary route',
+      hostNote: 'Pinning needs host support; falls back automatically',
       reset: 'Reset to default'
     },
     notify: {
@@ -231,6 +232,7 @@ const LOCALES = {
       statusOnce: (m) => `本次（仅增强）：${m}`,
       statusDefault: (m) => `默认（仅增强）：${m}`,
       statusUnsupported: '当前 Hermes 版本不支持固定模型，已走辅助路由',
+      hostNote: '固定模型需宿主支持；不支持时自动回落',
       reset: '恢复默认'
     },
     notify: {
@@ -261,6 +263,7 @@ const LOCALES = {
       statusOnce: (m) => `本次（僅增強）：${m}`,
       statusDefault: (m) => `預設（僅增強）：${m}`,
       statusUnsupported: '目前 Hermes 版本不支援固定模型，已走輔助路由',
+      hostNote: '固定模型需宿主支援；不支援時自動回落',
       reset: '恢復預設'
     },
     notify: {
@@ -977,8 +980,10 @@ function EnhanceButton() {
       if (metaGesture.current) {
         suppressClose.current = false
         const sid = resolveSessionId(btnRef.current, () => host.state.activeSessionId.get())
-        // A run-pick made in another composer is not this composer's pick.
-        if (oncePin && oncePin.sessionId && oncePin.sessionId !== sid) setOncePin(null)
+        // A run-pick made in another composer is not this composer's pick — but
+        // only drop it when we KNOW which session this is: a fresh draft has no
+        // id, and clearing on "unknown" threw away a pick the user still meant.
+        if (oncePin && oncePin.sessionId && sid && oncePin.sessionId !== sid) setOncePin(null)
         setMenuTarget({
           sessionId: sid,
           profile: host.state.focusedSessionProfile.get() || null,
@@ -999,6 +1004,11 @@ function EnhanceButton() {
             label: tip,
             children: jsx(Button, {
               'aria-label': tip,
+              // The Radix trigger is our wrapper span, so haspopup/expanded would
+              // otherwise land on a non-focusable node and the button would read
+              // as a plain button to screen readers.
+              'aria-haspopup': 'menu',
+              'aria-expanded': menuOpen,
               [BTN_ATTR]: '',
               className: GHOST_ICON_BTN,
               disabled: false, // spinner is a cancel button while busy (WorkBuddy parity)
@@ -1092,6 +1102,22 @@ function EnhanceButton() {
                     minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
                   },
                   children: statusLine
+                })
+              }),
+              // The pin rides on a host contract field (#118430). Saying so up
+              // front beats letting the user pick a model, click enhance, and
+              // only THEN learn it fell back — which is what happened on a host
+              // whose build predates the passthrough.
+              pin.unsupported ? null : jsx(DropdownMenuItem, {
+                key: 'hostNote',
+                disabled: true,
+                onSelect: (e) => e.preventDefault(),
+                children: jsx('span', {
+                  style: {
+                    color: 'var(--ui-text-tertiary)', display: 'block', fontSize: '0.62rem',
+                    minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
+                  },
+                  children: t('menu.hostNote')
                 })
               }),
               (pin.once || pinComplete(pin.def)) ? jsx(DropdownMenuItem, {

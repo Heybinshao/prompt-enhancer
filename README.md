@@ -1,6 +1,6 @@
 # Prompt Enhancer for Hermes
 
-![仓库版本](https://img.shields.io/badge/仓库-v1.8.1-blue) ![官方目录](https://img.shields.io/badge/官方目录-v1.6.1-lightgrey) ![Hermes](https://img.shields.io/badge/Hermes-%E2%89%A5%200.21.6-informational)
+![仓库版本](https://img.shields.io/badge/仓库-v1.8.2-blue) ![官方目录](https://img.shields.io/badge/官方目录-v1.6.1-lightgrey) ![Hermes](https://img.shields.io/badge/Hermes-%E2%89%A5%200.21.6-informational)
 
 【Hermes 桌面端插件】输入框里的 ✨ 按钮：先把草稿的错别字修干净，再改写成结构化完整提示词。en / 简中 / 繁體。
 
@@ -13,7 +13,7 @@
 | 来源 | 版本 | 点一下会做什么 | ⌘ 选模型 | 升级方式 |
 |---|---|---|---|---|
 | 官方插件目录<br>`hermes plugins install prompt-enhancer` | **1.6.1**<br>（1.7.1 的 bump 在审核：[#145027](https://github.com/NousResearch/hermes-agent/pull/145027)） | 直接增强，没有修复步骤 | ✗ | `hermes plugins update prompt-enhancer` |
-| 本仓库 main<br>Git 安装 ／ 手动放置 | **1.8.1** | 先修复、再增强 | ✓ | 重装 + 勾「强制重装」 |
+| 本仓库 main<br>Git 安装 ／ 手动放置 | **1.8.2** | 先修复、再增强 | ✓ | 重装 + 勾「强制重装」 |
 
 一句话记住差别：**目录条目钉在某个已评审的 commit 上，所以永远慢一截**。下文中标 `〔1.7〕`〔1.8〕的功能，目录用户要等对应 bump 合并才拿得到。
 
@@ -23,6 +23,7 @@
 - **1.7.0 / 1.7.1**：拆成「修复 → 增强」两次独立调用，修复结果写回输入框可见；⌥ 点击只修复
 - **1.8.0**（本仓库）：⌘ 点击选增强模型（本次 / 默认），菜单内一条「恢复默认」
 - **1.8.1**：多 profile 路由修正（模型目录按会话所属 profile 拉，裸请求也落在该 profile）、输出上限按输入长度自适应、取消后不再重试、跨窗口同步默认值
+- **1.8.2**：菜单里提前说明「固定模型需宿主支持」，按钮补 `aria-haspopup/aria-expanded`，新草稿不再误清本次选择
 
 > 目录实际版本以插件卡片显示为准；本页写于 2026-10-28。
 

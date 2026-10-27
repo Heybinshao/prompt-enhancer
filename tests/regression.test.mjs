@@ -222,6 +222,21 @@ test('R11d: 一条「恢复默认」清掉本次+默认（不并列两个清除�
   assert.ok(!src.includes('clearOnce'), '旧的「清除本次选择」入口必须移除（避免两个清除控件）')
 })
 
+test('R21: 菜单预告宿主依赖 + 按钮 a11y + draft 不清本次', () => {
+  const fs = process.getBuiltinModule('fs')
+  const src = fs.readFileSync(new URL('../desktop/plugin.js', import.meta.url), 'utf8')
+  // 菜单里常驻一行「需宿主支持」，检测到降级后换成更强的 statusUnsupported
+  assert.ok(/key: 'hostNote'/.test(src), '缺宿主依赖提示行')
+  assert.ok(/pin\.unsupported \? null : jsx\(DropdownMenuItem, \{\s*\n\s*key: 'hostNote'/.test(src), '提示行应在已降级时让位')
+  assert.ok(/hostNote: /.test(src), '缺 hostNote 文案')
+  // Radix 把 aria-* 挂在外层 span，按钮本体要自己声明
+  assert.ok(/'aria-haspopup': 'menu'/.test(src), '按钮缺 aria-haspopup')
+  assert.ok(/'aria-expanded': menuOpen/.test(src), '按钮缺 aria-expanded')
+  // 无会话（新草稿）时不得清掉别处的本次选择
+  assert.ok(/oncePin\.sessionId !== sid\) setOncePin\(null\)/.test(src) && /oncePin\.sessionId && sid &&/.test(src),
+    'draft 场景仍会误清本次')
+})
+
 test('R20: 多 profile 接线——菜单按会话 profile 拉、裸请求带 profile、本次 pin 绑会话', () => {
   const fs = process.getBuiltinModule('fs')
   const src = fs.readFileSync(new URL('../desktop/plugin.js', import.meta.url), 'utf8')
