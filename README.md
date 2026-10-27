@@ -54,7 +54,7 @@
 | 方式 | 怎么做 | 装到哪版 | 装完还要做什么 |
 |---|---|---|---|
 | **官方目录** | `hermes plugins install prompt-enhancer` | 1.6.1 | ⌘Q 重开 → 到 **技能与工具 → 插件 → Prompt Enhancer** 打开它 |
-| **从 Git 安装**（要 1.8.0 用这个） | 对 Hermes 说：`从 Git 安装这个桌面插件：https://github.com/Heybinshao/prompt-enhancer，安装好后并打开插件`<br>或点「技能与工具 → 插件」页面上方的「从 Git 安装」 | 仓库当前提交 | 同上；升级 = 重装并勾「强制重装」 |
+| **从 Git 安装**（要 2.0.0 用这个） | 对 Hermes 说：`从 Git 安装这个桌面插件：https://github.com/Heybinshao/prompt-enhancer，安装好后并打开插件`<br>或点「技能与工具 → 插件」页面上方的「从 Git 安装」 | 仓库当前提交 | 同上；升级 = 重装并勾「强制重装」 |
 | **手动放置** | 下载 [`desktop/plugin.js`](desktop/plugin.js) → 放到 `~/.hermes/desktop-plugins/prompt-enhancer/plugin.js` | 只有界面 | ⌘Q 重开即可；**换模型不会生效**（缺后端半边，需整包安装） |
 
 **装完按钮没出现**：几乎都是没打开。包管理安装（目录 / Git）的桌面副本默认是关的——不加载、也不报错，只是静默不出现，去 **技能与工具 → 插件 → Prompt Enhancer** 点亮。
@@ -98,7 +98,7 @@
 - 因为是写配置，这些值也会出现在 Hermes 自己的 **设置 → 辅助模型** 里；插件更新不会丢。
 - 菜单里只留模型本身：目录自带的「添加自定义模型 / 编辑模型」两行在这个菜单里被隐藏。
 
-> 这一步需要插件的后端半边（`dashboard/plugin_api.py`，几十行，只做写配置）。装后端要重启一次 Hermes；之后换多少次模型都不再重启。
+> 这一步需要插件的后端半边（`dashboard/plugin_api.py`，几十行，只做写配置）。装好后端第一次点开就自动挂载，通常不用重启；只有菜单报错时才 ⌘Q 重开一次。
 
 **高级：两步想用不同模型**（修字用快模型、重写用强模型）——在 `config.yaml` 里分别配：
 
@@ -143,9 +143,9 @@ auxiliary:
 
 两次调用都是无状态 one-shot：先 `task: prompt_repair` 修字并写回，再 `task: prompt_enhancement` 重写。写回前做快照比对，草稿在等待期被手改就放弃应用——绝不覆盖用户的字；修复稿的原始备份只记一次，所以「恢复原文」永远回到你打的那一版。
 
-未选模型时请求不带 `session_id`（落辅助路由）；选了模型才带，并显式指定 `provider` / `model`，同时用 `session_id` 锁定 profile 作用域。
+请求本身不带 `provider` / `model`——模型从 `config.yaml` 的 `auxiliary.prompt_repair` / `auxiliary.prompt_enhancement` 读；只带当前 profile 作用域，避免多 profile 时落到别的 profile 的辅助路由。
 
-> 纯 SDK 实现 + `requires_hermes: ">=0.21.5"`：低于此版本的 Hermes 不会安装（旧版桌面端的 DOM 读写兼容层已删除，见目录 PR [#121246](https://github.com/NousResearch/hermes-agent/pull/121246)）。
+> 纯 SDK 实现 + `requires_hermes: ">=0.21.6"`：低于此版本的 Hermes 不会安装（旧版桌面端的 DOM 读写兼容层已删除，见目录 PR [#121246](https://github.com/NousResearch/hermes-agent/pull/121246)）。
 
 ## 反馈
 
