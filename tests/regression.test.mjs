@@ -244,9 +244,10 @@ test('R20: 多 profile 接线——菜单按会话 profile 拉、裸请求带 pr
   assert.ok(/profile: menuTarget\.profile \|\| 'default'/.test(src), '菜单缺 profile')
   assert.ok(/gateway: menuTarget\.gateway \?\? undefined/.test(src), '菜单缺 gateway')
   assert.ok(/host\.state\.focusedSessionProfile\.get\(\)/.test(src), '未读会话所属 profile')
-  // 裸请求（无 pin）必须带 profile，否则落 launch profile 的辅助路由
-  assert.ok(/Object\.assign\(req, profileScope\(/.test(src), '增强裸请求缺 profile')
-  assert.ok(/\.\.\.profileScope\(host\.state\.focusedSessionProfile\.get\(\)\)/.test(src), '修复请求缺 profile')
+  // 裸请求（无 pin）必须带 profile，否则落 launch profile 的辅助路由；两处调用点都要有
+  const profileAssigns = (src.match(/Object\.assign\(req, profileScope\(/g) || []).length
+  assert.ok(profileAssigns >= 2, '增强与修复的裸请求都应带 profile，实际 ' + profileAssigns)
+  assert.ok(/profileScope\(host\.state\.focusedSessionProfile\.get\(\)\)/.test(src), '未读会话所属 profile')
   // 本次 pin 绑会话
   assert.ok(/setOncePin\(\{ provider, model, sessionId: menuTarget\.sessionId \}\)/.test(src), '本次 pin 未绑定会话')
   // 跨窗口同步
@@ -272,14 +273,18 @@ test('R11e: 选模型不关菜单；默认开时选模型即改默认；状态�
   assert.ok(sb.indexOf('pinComplete(pin.def)') < sb.indexOf('pin.once'), '状态行必须默认优先（否则开了默认还显示本次）')
 })
 
-test('R11c: 仅修复路径不跟随 pin（repair 仍走 prompt_repair 辅助路由）', () => {
+test('R11c: 仅修复路径也跟随同一个模型（一个选择管两步）', () => {
   const fs = process.getBuiltinModule('fs')
   const src = fs.readFileSync(new URL('../desktop/plugin.js', import.meta.url), 'utf8')
   const start = src.indexOf('async function runRepair(')
   const next = src.indexOf('\nasync function ', start + 10)
   const body = src.slice(start, next === -1 ? undefined : next)
-  assert.ok(!/effectivePin|req\.provider|req\.model/.test(body), '仅修复路径不得读取/透传 pin')
-  assert.ok(/task: 'prompt_repair'/.test(body), '仅修复路径必须留在 prompt_repair 任务上')
+  assert.ok(/effectivePin\(sessionId\)/.test(body), '修复步骤必须读同一个模型选择')
+  assert.ok(/req\.provider = pin\.provider/.test(body) && /req\.model = pin\.model/.test(body), '修复请求必须带同一个模型')
+  assert.ok(/task: 'prompt_repair'/.test(body), '修复步骤必须留在 prompt_repair 任务上（日志/归属）')
+  // 两处调用点都必须是同一套 pin 分支
+  const pinBlocks = (src.match(/^\s+if \(pin\) \{$/gm) || []).length
+  assert.ok(pinBlocks >= 2, '增强与修复都应各有 pin 分支，实际 ' + pinBlocks)
 })
 
 // R12 (v1.8.0 恢复为 R18/R19 的语义镜像): 被镜像的归一化与优先级逻辑见下。

@@ -12,11 +12,9 @@
  *   undo, never "back to the half-fixed draft".
  *   - read:  host.composer.getDraft (official session-addressed draft)
  *   - write: host.composer.setDraft — the app re-hydrates @ref / `/` tokens
- *   - model: both requests are sent BARE (no session_id), so llm.oneshot's auto
- *            arm lands on the configured aux route. To pin a dedicated model per
- *            step, set `auxiliary.prompt_repair` / `auxiliary.prompt_enhancement`
- *            in config.yaml — or ⌘-click the button for the enhancement picker
- *            (this-run / default, see the pin block below).
+ *   - model: ONE choice covers both steps. No pick → both requests go out BARE
+ *            (no session_id) and land on the configured aux route; a pick from
+ *            the ⌘ menu (this run / default) rides on BOTH requests.
  *            NOTE: `auxiliary.<task>.timeout` does NOT apply here — the backend
  *            hard-caps each one-shot at 60s (agent/oneshot.py).
  *   - A2:    write-back only when draft untouched during the wait
@@ -198,8 +196,8 @@ const LOCALES = {
       off: 'Off',
       on: 'On',
       statusMain: 'Using the default model',
-      statusOnce: (m) => `This run (enhance only): ${m}`,
-      statusDefault: (m) => `Default (enhance only): ${m}`,
+      statusOnce: (m) => `This run: ${m}`,
+      statusDefault: (m) => `Default: ${m}`,
       statusUnsupported: "This Hermes build can't switch models — the default is used",
       hostNote: "Switching models needs a newer Hermes; until then the default is used",
       reset: 'Reset to default'
@@ -229,8 +227,8 @@ const LOCALES = {
       off: '关',
       on: '开',
       statusMain: '用默认模型（未指定）',
-      statusOnce: (m) => `本次（仅增强）：${m}`,
-      statusDefault: (m) => `默认（仅增强）：${m}`,
+      statusOnce: (m) => `本次：${m}`,
+      statusDefault: (m) => `默认：${m}`,
       statusUnsupported: '这一版 Hermes 还不能换模型，已用默认模型',
       hostNote: '换模型要等 Hermes 更新；在那之前用默认模型',
       reset: '恢复默认'
@@ -260,8 +258,8 @@ const LOCALES = {
       off: '關',
       on: '開',
       statusMain: '用預設模型（未指定）',
-      statusOnce: (m) => `本次（僅增強）：${m}`,
-      statusDefault: (m) => `預設（僅增強）：${m}`,
+      statusOnce: (m) => `本次：${m}`,
+      statusDefault: (m) => `預設：${m}`,
       statusUnsupported: '這一版 Hermes 還不能換模型，已用預設模型',
       hostNote: '換模型要等 Hermes 更新；在那之前用預設模型',
       reset: '恢復預設'
@@ -515,18 +513,27 @@ async function runRepair(c, sessionId, text, st, seq, onRetry) {
   }
   let res
   try {
-    res = await callGatewayWithRetry(gw, {
+    // ONE model for the whole button: the repair step carries the same pick as
+    // the enhancement. Two steps, one choice — otherwise the user has to hold
+    // "this setting only affects half of what the button does" in their head.
+    const pin = effectivePin(sessionId)
+    const req = {
       instructions: REPAIR_TEMPLATE,
       input: text,
       // Output is as long as the input, so the budget tracks it: the enhance
       // call's fixed 2048 would truncate a 1.5k-character draft.
       max_tokens: Math.min(8192, Math.ceil(text.length * 1.6) + 256),
       temperature: 0, // proofreading is not a creative task
-      // Its own aux task so the two steps can be routed separately (a fast
-      // model for repair, a strong one for enhancement).
-      task: 'prompt_repair',
-      ...profileScope(host.state.focusedSessionProfile.get())
-    }, onRetry, () => seq !== st.seq)
+      task: 'prompt_repair'
+    }
+    if (pin) {
+      req.provider = pin.provider
+      req.model = pin.model
+      if (sessionId) req.session_id = sessionId
+    } else {
+      Object.assign(req, profileScope(host.state.focusedSessionProfile.get()))
+    }
+    res = await callGatewayWithRetry(gw, req, onRetry, () => seq !== st.seq)
   } catch (e) {
     console.error('[prompt-enhancer] repair failed (enhancing the original):', e)
     return null
