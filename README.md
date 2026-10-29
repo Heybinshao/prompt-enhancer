@@ -1,6 +1,6 @@
 # Prompt Enhancer for Hermes
 
-![仓库版本](https://img.shields.io/badge/仓库-v2.0.0-blue) ![官方目录](https://img.shields.io/badge/官方目录-v1.6.1-lightgrey) ![Hermes](https://img.shields.io/badge/Hermes-%E2%89%A5%200.21.6-informational)
+![仓库版本](https://img.shields.io/badge/仓库-v2.0.0-blue) ![官方目录](https://img.shields.io/badge/官方目录-v1.7.1-lightgrey) ![Hermes](https://img.shields.io/badge/Hermes-%E2%89%A5%200.21.6-informational)
 
 【Hermes 桌面端插件】输入框里的 ✨ 按钮：先把草稿的错别字修干净，再改写成结构化完整提示词。en / 简中 / 繁體。
 
@@ -12,17 +12,17 @@
 
 | 来源 | 版本 | 点一下会做什么 | ⌘ 选模型 | 升级方式 |
 |---|---|---|---|---|
-| 官方插件目录<br>`hermes plugins install prompt-enhancer` | **1.6.1**<br>（1.7.1 的 bump 在审核：[#145027](https://github.com/NousResearch/hermes-agent/pull/145027)） | 直接增强，没有修复步骤 | ✗ | `hermes plugins update prompt-enhancer` |
+| 官方插件目录<br>`hermes plugins install prompt-enhancer` | **1.7.1** | 先修复、再增强（⌥ 点击只修复） | ✗ | `hermes plugins update prompt-enhancer` |
 | 本仓库 main<br>Git 安装 ／ 手动放置 | **2.0.0** | 先修复、再增强 | ✓ | 重装 + 勾「强制重装」 |
 
-一句话记住差别：**目录条目钉在某个已评审的 commit 上，所以永远慢一截**——下面正文按 2.0.0 写，目录用户少的是「先修复再增强」和「⌘ 选模型」这两块。
+一句话记住差别：**目录条目钉在某个已评审的 commit 上，所以永远慢一截**——下面正文按 2.0.0 写。目录用户（1.7.1）少的是「⌘ 选模型」，另外 1.7.1 之后的几处修正也还没进去：取消后不再补发 429 重试、增强结果长度上限按输入自适应、多 profile 会话按会话自己的 profile 发请求。
 
 各版本差在哪：
 
-- **官方插件收录**：目前 **1.6.1**——单步增强，不能选模型
+- **官方插件收录**：目前 **1.7.1**——先修复再增强，⌥ 点击只修复；不能选模型
 - **当前仓库最新**：**2.0.0**——先修复再增强；⌘ 选模型写进 `config.yaml`，点一下立即生效、不用重启
 
-> 目录实际版本以插件卡片显示为准；本页写于 2026-10-28。
+> 目录实际版本以插件卡片显示为准；本页写于 2026-10-29。
 
 ## 它做什么
 
@@ -40,7 +40,7 @@
 
 | 方式 | 怎么做 | 装到哪版 | 装完还要做什么 |
 |---|---|---|---|
-| **官方目录** | `hermes plugins install prompt-enhancer` | 1.6.1 | ⌘Q 重开 → 到 **技能与工具 → 插件 → Prompt Enhancer** 打开它 |
+| **官方目录** | `hermes plugins install prompt-enhancer` | 1.7.1 | ⌘Q 重开 → 到 **技能与工具 → 插件 → Prompt Enhancer** 打开它 |
 | **从 Git 安装**（要 2.0.0 用这个） | 对 Hermes 说：`从 Git 安装这个桌面插件：https://github.com/Heybinshao/prompt-enhancer，安装好后并打开插件`<br>或点「技能与工具 → 插件」页面上方的「从 Git 安装」 | 仓库当前提交 | 同上；升级 = 重装并勾「强制重装」 |
 | **手动放置** | 下载 [`desktop/plugin.js`](desktop/plugin.js) → 放到 `~/.hermes/desktop-plugins/prompt-enhancer/plugin.js` | 只有界面 | ⌘Q 重开即可；**换模型不会生效**（缺后端半边，需整包安装） |
 
@@ -52,7 +52,7 @@
 
 ## 使用
 
-下表按 2.0.0 写；1.6.1 只有「点 ✨ 增强」和「再点一次回退」两行。
+下表按 2.0.0 写；目录版 1.7.1 除「⌘ 点击 ✨」那一行外都支持。
 
 | 动作 | 现在会发生什么 |
 |---|---|
@@ -134,7 +134,7 @@ auxiliary:
 
 请求本身不带 `provider` / `model`——模型从 `config.yaml` 的 `auxiliary.prompt_repair` / `auxiliary.prompt_enhancement` 读；只带当前 profile 作用域，避免多 profile 时落到别的 profile 的辅助路由。
 
-> 纯 SDK 实现 + `requires_hermes: ">=0.21.6"`：低于此版本的 Hermes 不会安装（旧版桌面端的 DOM 读写兼容层已删除，见目录 PR [#121246](https://github.com/NousResearch/hermes-agent/pull/121246)）。
+> 纯 SDK 实现 + `requires_hermes: ">=0.21.6"`：低于此版本的 Hermes 不会安装（旧版桌面端的 DOM 读写兼容层已删除，见目录 PR [#121246](https://github.com/NousResearch/hermes-agent/pull/121246)）。目录里的 1.7.1 还是 `>=0.21.5`，门槛从 1.8.1 起抬到 0.21.6。
 
 ## 反馈
 
