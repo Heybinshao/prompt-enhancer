@@ -204,15 +204,31 @@ function cleanRepair(text) {
 // next to its sibling rather than inventing a second mechanism.
 const SLASH_CMD_RE = /^\/[A-Za-z][A-Za-z0-9_-]{0,31}(?=\s|$)/
 
+// The composer treats a slash in TWO shapes (apps/desktop …/composer/text-utils.ts):
+// position 0 is a COMMAND the app executes, while `/skill` after whitespace is an
+// inline REFERENCE — "the inline shape is what makes skills reachable anywhere in
+// a prompt". Both are chips after commit, so both must survive a rewrite; the
+// path lookahead keeps `/Users/xiebin/a.md` and `1/2` out of it.
+const SLASH_REF_RE = /(?:^|[\s\uFFFC])\/[A-Za-z][\w-]{0,31}(?![\w./-])/g
+
 function slashCommandOf(text) {
   const m = String(text ?? '').trim().match(SLASH_CMD_RE)
   return m ? m[0] : ''
 }
 
+function slashReferencesOf(text) {
+  const out = []
+  for (const m of String(text ?? '').matchAll(SLASH_REF_RE)) {
+    const token = m[0].trim()
+    if (token && !out.includes(token)) out.push(token)
+  }
+  return out
+}
+
 function enhanceTokensOk(original, output) {
   if (!chipsPreserved(original, output)) return false
-  const cmd = slashCommandOf(original)
-  return !cmd || String(output ?? '').includes(cmd)
+  const out = String(output ?? '')
+  return slashReferencesOf(original).every((token) => out.includes(token))
 }
 
 // Same "模型给自己加标题" problem as repair, different vocabulary: the enhance
@@ -891,10 +907,12 @@ async function runEnhance(btnEl, onPhase, onRetry, opts) {
 
   // ── step 2: enhance on top of the repaired draft ────────────────────────
   const hasChips = CHIP_REF_RE.test(base)
-  // A leading /command is a machine token too, and the hard gate rejects a
-  // result that drops it — so the model must be TOLD about it even when the
-  // draft carries no @ref. Without this, every `/plan ...` draft was rejected.
-  const needsTokenClause = hasChips || Boolean(slashCommandOf(base))
+  // A slash reference is a machine token too — position 0 (command the app runs)
+  // or inline (`/skill` in prose, which is how skills are addressed anywhere in a
+  // draft). The hard gate rejects a result that drops one, so the model has to be
+  // told about them even when the draft carries no @ref. Without this, every
+  // `/plan ...` draft was rejected.
+  const needsTokenClause = hasChips || slashReferencesOf(base).length > 0
   st.phase = 'enhancing'
   onPhase('enhancing')
   try {
@@ -905,7 +923,7 @@ async function runEnhance(btnEl, onPhase, onRetry, opts) {
     // template is false for this call.
     if (contextBlock) blocks.push(contextBlock)
     if (needsTokenClause) {
-      blocks.push('额外硬性约束：草稿中的 @file:、@folder:、@url:、@image: 等引用标记，以及开头的 /命令，都是机器 token。逐字保留，位置可以调整；禁止改写、翻译、删除，也不要给它们加引号或反引号。')
+      blocks.push('额外硬性约束：草稿中的 @file:、@folder:、@url:、@image: 等引用标记，以及 /命令（行首的调用和行内的 /skill 引用），都是机器 token。逐字保留，位置可以调整；禁止改写、翻译、删除，也不要给它们加引号或反引号。')
     }
     blocks.push(`【输出上限】不超过 ${cap} 字符（本次按输入长度自适应，只是天花板）。`)
     const instructions = blocks.join('\n\n')

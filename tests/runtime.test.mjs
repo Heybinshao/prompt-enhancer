@@ -74,7 +74,7 @@ export const __test = {
   pinComplete, snapshotPin, isContractReject, callGatewayWithRetry, cleanRepair,
   stripWrappingQuotes, looksTruncated, outputCapFor, maxTokensFor, profileScope,
   repairDriftOk, chipsPreserved, REPAIR_PREFIX_RE,
-  cleanEnhance, enhanceTokensOk, slashCommandOf, extractGlossary, buildContextBlock, ENHANCE_PREFIX_RE,
+  cleanEnhance, enhanceTokensOk, slashCommandOf, slashReferencesOf, extractGlossary, buildContextBlock, ENHANCE_PREFIX_RE,
   runEnhance,
   hostRef: host,
   setStorage: (s) => { storageApi = s },
@@ -253,6 +253,16 @@ test('T15: 增强结果丢 chip / 丢 /命令 一律拒绝写回', () => {
   assert.equal(T.slashCommandOf('整理一下 /compact'), '', '只有开头的斜杠才是命令')
   assert.equal(T.slashCommandOf('/Users/xiebin/a.md 看下这个'), '', '路径不是命令')
   assert.ok(T.enhanceTokensOk('没有引用的普通草稿', '改写后的普通草稿'), '无 token 直接放行')
+})
+
+test('T15b: 行内 /skill 引用也要存活（skill 可以出现在提示词任意位置）', () => {
+  const draft = '用 /content-drafting 写一篇公众号稿，格式参考 /wechat-publish'
+  assert.deepEqual(T.slashReferencesOf(draft), ['/content-drafting', '/wechat-publish'])
+  assert.ok(T.enhanceTokensOk(draft, '帮我写一篇公众号稿：用 /content-drafting，格式参照 /wechat-publish'), '两个都保留 → 放行')
+  assert.ok(!T.enhanceTokensOk(draft, '用写作技能写一篇公众号稿，格式参考发布流程'), '被改写成自然语言 → 拒绝')
+  assert.deepEqual(T.slashReferencesOf('/Users/xiebin/a.md 看下'), [], '/Users/… 不是引用')
+  assert.deepEqual(T.slashReferencesOf('把 1/2 改成 a/b'), [], '分数与路径片段不算引用')
+  assert.deepEqual(T.slashReferencesOf('这个/那个'), [], '中文里紧贴斜杠不算引用')
 })
 
 test('T16: cleanEnhance 剥掉「改写后：」这类标题，但不吃用户的「输出：」', () => {
