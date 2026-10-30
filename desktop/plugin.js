@@ -100,6 +100,7 @@ const REPAIR_TEMPLATE = `你是文本校对员，负责修正语音输入和快�
 - 不改写风格、不润色、不扩写、不精简
 - 不补充信息、不调整结构、不合并或拆分句子
 - 不改变原文语言与语气
+- 不碰以 / 开头的命令和行内的 /skill 引用：它们是机器 token，不属于要校对的文本
 
 判定规则：
 - 判断标准是"这句话在语境里通不通"，不是"这个词本身对不对"
@@ -761,7 +762,11 @@ async function runRepair(c, sessionId, text, st, seq, onRetry, glossary) {
     console.error('[prompt-enhancer] repair no-op', JSON.stringify({ inLen: text.length, outLen: repaired.length }))
     return null
   }
-  if (!repairDriftOk(text, repaired) || !chipsPreserved(text, repaired)) {
+  // A slash reference is a machine token too. The old guard only knew about
+  // @file: chips, so a draft holding `/skill` references (repair is NOT skipped
+  // for those — only @chips are) could have them silently rewritten inside the
+  // 15% drift budget. Same gate as enhance, one definition.
+  if (!repairDriftOk(text, repaired) || !enhanceTokensOk(text, repaired)) {
     console.error('[prompt-enhancer] repair rejected by guardrail (drift/chip) — enhancing the original',
       JSON.stringify({ inLen: text.length, outLen: repaired.length }))
     return null

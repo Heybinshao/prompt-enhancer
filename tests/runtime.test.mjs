@@ -403,6 +403,27 @@ await testAsync('T22: 纯 /命令 草稿也会收到 token 保真约束', async 
   assert.ok(/\/命令/.test(enhanceInstr), '条款点名 /命令')
 })
 
+// 修复阶段原来只校验 @file 引用：带 /skill 的草稿并不跳过修复（只有 @chip 跳），
+// 模型把 `/content-drafting` 写成 `content-drafting` 时长度几乎不变，漂移闸放行。
+await testAsync('T24: 修复阶段丢掉 /skill 引用 → 整次修复结果被拒', async () => {
+  const draft = '用 /content-drafting 写稿'
+  const { calls } = fakeComposer(T.hostRef, { draft, repairOut: '用 content-drafting 写稿', enhanceOut: `${draft}（已增强）` })
+  await T.runEnhance(fakeBtn(), () => {}, null, undefined)
+  const oneShots = calls.filter((c) => c.method === 'llm.oneshot')
+  assert.ok(/不碰以 \/ 开头的命令/.test(oneShots[0].params.instructions), '修复模板已告知不要碰 slash token')
+  assert.equal(oneShots[1].params.input, draft, '被拒的修复不得成为增强的输入')
+})
+
+await testAsync('T24b: 修复结果保住 /skill → 正常写回并作为增强输入', async () => {
+  const draft = '用 /content-drafting 写稿。'
+  const fixed = '用 /content-drafting 写稿'
+  const { calls, draft: now } = fakeComposer(T.hostRef, { draft, repairOut: fixed, enhanceOut: '/content-drafting 写一篇稿子' })
+  await T.runEnhance(fakeBtn(), () => {}, null, undefined)
+  const oneShots = calls.filter((c) => c.method === 'llm.oneshot')
+  assert.equal(oneShots[1].params.input, fixed, '引用保住的修复结果正常成为增强输入')
+  assert.equal(now(), '/content-drafting 写一篇稿子', '增强结果写回')
+})
+
 // ── 汇总 ──
 let fail = 0
 for (const [name, r] of results) {
