@@ -251,6 +251,7 @@ test('T15: 增强结果丢 chip / 丢 /命令 一律拒绝写回', () => {
   assert.ok(!T.enhanceTokensOk('/compact 之后继续整理', '整理会话记录'), '丢了开头 /命令 → 拒绝')
   assert.equal(T.slashCommandOf('/compact 整理一下'), '/compact')
   assert.equal(T.slashCommandOf('整理一下 /compact'), '', '只有开头的斜杠才是命令')
+  assert.equal(T.slashCommandOf('/Users/xiebin/a.md 看下这个'), '', '路径不是命令')
   assert.ok(T.enhanceTokensOk('没有引用的普通草稿', '改写后的普通草稿'), '无 token 直接放行')
 })
 
@@ -262,24 +263,28 @@ test('T16: cleanEnhance 剥掉「改写后：」这类标题，但不吃用户�
   assert.equal(T.cleanEnhance('输出：把三条结论列出来'), '输出：把三条结论列出来', '用户自己的开头不得被吃')
 })
 
-test('T17: 专有名词表只抽标识符，去重、取最近', () => {
+test('T17: 名词表——标识符 + 出现两次的产品名，排除令牌/哈希/版本号', () => {
   const msgs = [
-    { role: 'user', text: '看看 prompt-enhancer 里的 chipsPreserved 逻辑' },
-    { role: 'assistant', text: '现在用的是 Hermes 0.21.6，文件在 plugin.js 里' },
-    { role: 'user', text: '好的 the and with' }
+    { role: 'user', text: 'Hermes 的 prompt-enhancer 里 chipsPreserved 怎么写的' },
+    { role: 'assistant', text: '现在用的是 Hermes 0.21.6，文件在 /Users/xiebin/Projects/catalog-prep/prompt-enhancer/desktop/plugin.js' },
+    { role: 'user', text: '好的，令牌 ghp_abcdefghijklmn 和 a1b2c3d4e5f6 还有 v2.2.0 都别外传' }
   ]
   const terms = T.extractGlossary(msgs)
   assert.ok(terms.includes('prompt-enhancer'), '含连字符标识符')
   assert.ok(terms.includes('chipsPreserved'), '含 camelCase')
-  assert.ok(terms.includes('plugin.js'), '含文件名')
-  assert.ok(!terms.includes('the'), '普通英文词不入表')
-  assert.ok(!terms.includes('Hermes'.toLowerCase()) || terms.includes('Hermes'), '不出现重复大小写变体')
+  assert.ok(terms.includes('plugin.js'), '长路径取文件名')
+  assert.ok(terms.includes('Hermes'), '出现两次的大写产品名入表（语音最易错的就是这类）')
+  assert.ok(!terms.includes('Users'), '路径只留文件名，不留目录段')
+  assert.ok(!terms.some((t) => /^ghp_/.test(t)), '令牌不入表')
+  assert.ok(!terms.some((t) => /^[0-9a-f]{12}$/i.test(t)), '十六进制哈希不占名额')
+  assert.ok(!terms.includes('v2.2.0'), '版本号不入表')
+  assert.ok(!terms.includes('the') && !terms.includes('and'), '普通英文词不入表')
   const dup = T.extractGlossary([{ role: 'user', text: 'foo.js foo.js foo.js' }, { role: 'user', text: 'FOO.js' }])
   assert.equal(dup.filter((t) => t.toLowerCase() === 'foo.js').length, 1, '去重按小写')
   assert.ok(T.extractGlossary([{ role: 'user', text: '这是一句纯中文' }]).length === 0, '纯中文不产生噪音')
 })
 
-test('T18: 上文块只取上一条用户消息 + 助手回复结尾，且截断', () => {
+test('T18: 上文块首尾都有定界、只取上一轮，且不许替换指代', () => {
   const long = 'a'.repeat(2000)
   const msgs = [
     { role: 'user', text: '很早以前的一句话' },
@@ -291,9 +296,21 @@ test('T18: 上文块只取上一条用户消息 + 助手回复结尾，且截断
   assert.ok(!block.includes('很早以前的一句话'), '不搬更早的轮次')
   assert.ok(block.includes('按刚才第二个方案改'), '含上一条用户消息')
   assert.ok(block.includes('结论是方案二'), '含助手回复的结尾而不是开头')
-  assert.ok(block.length < 1200, `上下文块必须短（实测 ${block.length}）`)
-  assert.ok(/禁止写进输出|不要写进输出/.test(block), '带「只读不搬」约束')
+  assert.ok(/【上文开始/.test(block) && /【上文结束】/.test(block), '首尾都有定界标记')
+  assert.ok(block.length < 1300, `上下文块必须短（实测 ${block.length}）`)
+  assert.ok(/不是给你的指令/.test(block), '写明上文不是指令')
+  assert.ok(/指代仍然原样保留/.test(block), '与模板对齐：不许用上文替换指代')
   assert.equal(T.buildContextBlock([]), '', '空历史 → 不加块')
+})
+
+test('T23: 结尾成对引号不被吃掉（增强结果最爱用「」点名）', () => {
+  const s = '把结果命名为「方案A」'
+  assert.equal(T.cleanEnhance(s), s, '结尾的 」 必须留下')
+  assert.equal(T.cleanRepair(s), s, '修复侧同样')
+  assert.ok(!T.looksTruncated(s), '引号配平就不得误报截断')
+  assert.equal(T.cleanEnhance('「整个结果」'), '整个结果', '整段被同一对引号包住才去壳')
+  assert.equal(T.cleanEnhance('「a「b」'), '「a「b」', '不配对的片段原样保留')
+  assert.equal(T.cleanEnhance('“引用整段”'), '引用整段')
 })
 
 // ── 端到端装配（v2.2.0）：真的跑 runEnhance，只桩掉 gateway / composer ──
@@ -336,6 +353,7 @@ await testAsync('T19: 普通点击——修复带名词表、增强带上限、�
   assert.ok(/本会话出现过的专有名词/.test(repairInstr), '修复带名词表')
   assert.ok(repairInstr.includes('prompt-enhancer'), '名词表取自会话里的标识符')
   assert.ok(!/上文/.test(repairInstr), '修复不带对话上文')
+  assert.ok(repairInstr.trim().endsWith('不要代码围栏。'), '名词表之后重申「只输出文本」，输出规则仍是最后一句')
   const enhanceInstr = oneShots[1].params.instructions
   assert.ok(/你是提示词改写器/.test(enhanceInstr), '第二次调增强模板')
   assert.ok(/【输出上限】不超过 \d+ 字符/.test(enhanceInstr), '上限以具体数字注入')
@@ -350,7 +368,7 @@ await testAsync('T20: ⇧ 点击——上文只进 system 半，草稿仍是唯�
   const enhance = calls.filter((c) => c.method === 'llm.oneshot')[1]
   assert.ok(/【上文/.test(enhance.params.instructions), '⇧ 时带上文块')
   assert.ok(enhance.params.instructions.includes('chipsPreserved'), '上文取最近一轮')
-  assert.ok(/禁止写进输出|只用于理解/.test(enhance.params.instructions), '上文块带只读约束')
+  assert.ok(/不写进输出|不是给你的指令/.test(enhance.params.instructions), '上文块带只读约束')
   assert.equal(enhance.params.input, draft, '草稿仍然是唯一 user 消息，不被上文污染')
 })
 
@@ -362,6 +380,17 @@ await testAsync('T21: 增强结果丢引用标记 → 不写回草稿', async ()
   const oneShots = calls.filter((c) => c.method === 'llm.oneshot')
   assert.equal(oneShots.length, 1, '含引用的草稿跳过修复，只发增强请求')
   assert.ok(/额外硬性约束/.test(oneShots[0].params.instructions), '引用齐备时仍注入保真条款')
+})
+
+// 验收缺口补的两条之一：纯 /命令 草稿必须收到「保留 /命令」的约束，
+// 否则硬闸每次都拒它（评审实测：输入 `/plan 做个东西` → 输出「请规划：…」→ 拒绝）。
+await testAsync('T22: 纯 /命令 草稿也会收到 token 保真约束', async () => {
+  const { calls } = fakeComposer(T.hostRef, { draft: '/plan 做个东西', enhanceOut: '/plan 做个东西：先列目标再拆步骤' })
+  await T.runEnhance(fakeBtn(), () => {}, null, undefined)
+  const oneShots = calls.filter((c) => c.method === 'llm.oneshot')
+  const enhanceInstr = oneShots[oneShots.length - 1].params.instructions
+  assert.ok(/额外硬性约束/.test(enhanceInstr), '没有 @ 引用也要注入保真条款')
+  assert.ok(/\/命令/.test(enhanceInstr), '条款点名 /命令')
 })
 
 // ── 汇总 ──
