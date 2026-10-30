@@ -74,6 +74,9 @@ export const __test = {
   pinComplete, snapshotPin, isContractReject, callGatewayWithRetry, cleanRepair,
   stripWrappingQuotes, looksTruncated, outputCapFor, maxTokensFor, profileScope,
   repairDriftOk, chipsPreserved, REPAIR_PREFIX_RE,
+  cleanEnhance, enhanceTokensOk, slashCommandOf, extractGlossary, buildContextBlock, ENHANCE_PREFIX_RE,
+  runEnhance,
+  hostRef: host,
   setStorage: (s) => { storageApi = s },
   setRest: (fn) => { restApi = fn },
   setKeepLocalOnly: (v) => { keepLocalOnly = v },
@@ -238,6 +241,127 @@ await testAsync('T14: 旧宿主不认 profile 参数 → 剥掉重发，之后�
   assert.equal(calls[1].profile, undefined)
   assert.deepEqual(T.profileScope('qiaomenren'), {}, '记住之后不得再带 profile')
   T.setHostRejectsProfile(false)
+})
+
+// ── 增强侧护栏与上下文（v2.2.0） ─────────────────────────────────────────
+test('T15: 增强结果丢 chip / 丢 /命令 一律拒绝写回', () => {
+  const draft = '@file:src/app.tsx 这个组件加个 loading，/compact 之后再说'
+  assert.ok(T.enhanceTokensOk(draft, draft + '（保持原样）'), '引用与命令都在 → 放行')
+  assert.ok(!T.enhanceTokensOk(draft, '这个组件加个 loading，/compact 之后再说'), '丢了 @file → 拒绝')
+  assert.ok(!T.enhanceTokensOk('/compact 之后继续整理', '整理会话记录'), '丢了开头 /命令 → 拒绝')
+  assert.equal(T.slashCommandOf('/compact 整理一下'), '/compact')
+  assert.equal(T.slashCommandOf('整理一下 /compact'), '', '只有开头的斜杠才是命令')
+  assert.ok(T.enhanceTokensOk('没有引用的普通草稿', '改写后的普通草稿'), '无 token 直接放行')
+})
+
+test('T16: cleanEnhance 剥掉「改写后：」这类标题，但不吃用户的「输出：」', () => {
+  assert.equal(T.cleanEnhance('改写后：帮我把方案整理一下'), '帮我把方案整理一下')
+  assert.equal(T.cleanEnhance('以下是增强后的提示词：帮我把方案整理一下'), '帮我把方案整理一下')
+  assert.equal(T.cleanEnhance('增强版本: 帮我把方案整理一下'), '帮我把方案整理一下')
+  assert.equal(T.cleanEnhance('“帮我把方案整理一下”'), '帮我把方案整理一下')
+  assert.equal(T.cleanEnhance('输出：把三条结论列出来'), '输出：把三条结论列出来', '用户自己的开头不得被吃')
+})
+
+test('T17: 专有名词表只抽标识符，去重、取最近', () => {
+  const msgs = [
+    { role: 'user', text: '看看 prompt-enhancer 里的 chipsPreserved 逻辑' },
+    { role: 'assistant', text: '现在用的是 Hermes 0.21.6，文件在 plugin.js 里' },
+    { role: 'user', text: '好的 the and with' }
+  ]
+  const terms = T.extractGlossary(msgs)
+  assert.ok(terms.includes('prompt-enhancer'), '含连字符标识符')
+  assert.ok(terms.includes('chipsPreserved'), '含 camelCase')
+  assert.ok(terms.includes('plugin.js'), '含文件名')
+  assert.ok(!terms.includes('the'), '普通英文词不入表')
+  assert.ok(!terms.includes('Hermes'.toLowerCase()) || terms.includes('Hermes'), '不出现重复大小写变体')
+  const dup = T.extractGlossary([{ role: 'user', text: 'foo.js foo.js foo.js' }, { role: 'user', text: 'FOO.js' }])
+  assert.equal(dup.filter((t) => t.toLowerCase() === 'foo.js').length, 1, '去重按小写')
+  assert.ok(T.extractGlossary([{ role: 'user', text: '这是一句纯中文' }]).length === 0, '纯中文不产生噪音')
+})
+
+test('T18: 上文块只取上一条用户消息 + 助手回复结尾，且截断', () => {
+  const long = 'a'.repeat(2000)
+  const msgs = [
+    { role: 'user', text: '很早以前的一句话' },
+    { role: 'assistant', text: '旧回复' },
+    { role: 'user', text: '按刚才第二个方案改' },
+    { role: 'assistant', text: `${long}结论是方案二` }
+  ]
+  const block = T.buildContextBlock(msgs)
+  assert.ok(!block.includes('很早以前的一句话'), '不搬更早的轮次')
+  assert.ok(block.includes('按刚才第二个方案改'), '含上一条用户消息')
+  assert.ok(block.includes('结论是方案二'), '含助手回复的结尾而不是开头')
+  assert.ok(block.length < 1200, `上下文块必须短（实测 ${block.length}）`)
+  assert.ok(/禁止写进输出|不要写进输出/.test(block), '带「只读不搬」约束')
+  assert.equal(T.buildContextBlock([]), '', '空历史 → 不加块')
+})
+
+// ── 端到端装配（v2.2.0）：真的跑 runEnhance，只桩掉 gateway / composer ──
+// 单测覆盖得住纯函数，但「历史读取 → 名词表 → 修复请求 → 增强请求」这条线是
+// 本次新接的，必须整条走一遍：两次 oneshot 的 instructions 到底拼成什么样。
+function fakeComposer(host, { history = [], draft = '把今天的会议纪要整理一下', repairOut = null, enhanceOut = '整理上周会议纪要' } = {}) {
+  const calls = []
+  let current = draft
+  const gw = {
+    request: async (method, params) => {
+      calls.push({ method, params })
+      if (method === 'session.history') return { messages: history }
+      if (params.task === 'prompt_repair') return { text: repairOut ?? params.input }
+      return { text: enhanceOut }
+    }
+  }
+  host.state.activeSessionId.get = () => 's1'
+  host.getGateway = () => gw
+  host.composer = { getDraft: async () => current, setDraft: async (_s, t) => { current = t; return true } }
+  return { calls, draft: () => current }
+}
+
+function fakeBtn() {
+  const editor = { isContentEditable: true }
+  return { closest: () => ({ querySelector: () => editor, getAttribute: () => null }) }
+}
+
+const HISTORY = [
+  { role: 'user', text: '我在调 prompt-enhancer 这个插件' },
+  { role: 'assistant', text: '好的，看 plugin.js 里的 chipsPreserved' }
+]
+
+await testAsync('T19: 普通点击——修复带名词表、增强带上限、不带上文', async () => {
+  const { calls } = fakeComposer(T.hostRef, { history: HISTORY })
+  await T.runEnhance(fakeBtn(), () => {}, null, undefined)
+  const oneShots = calls.filter((c) => c.method === 'llm.oneshot')
+  assert.equal(oneShots.length, 2, '一次点击 = 修复 + 增强两次调用')
+  const repairInstr = oneShots[0].params.instructions
+  assert.ok(/你是文本校对员/.test(repairInstr), '第一次调修复模板')
+  assert.ok(/本会话出现过的专有名词/.test(repairInstr), '修复带名词表')
+  assert.ok(repairInstr.includes('prompt-enhancer'), '名词表取自会话里的标识符')
+  assert.ok(!/上文/.test(repairInstr), '修复不带对话上文')
+  const enhanceInstr = oneShots[1].params.instructions
+  assert.ok(/你是提示词改写器/.test(enhanceInstr), '第二次调增强模板')
+  assert.ok(/【输出上限】不超过 \d+ 字符/.test(enhanceInstr), '上限以具体数字注入')
+  assert.ok(!/【上文/.test(enhanceInstr), '普通点击不带上文')
+  assert.equal(oneShots[1].params.input, '把今天的会议纪要整理一下', '用户消息只有草稿本身')
+})
+
+await testAsync('T20: ⇧ 点击——上文只进 system 半，草稿仍是唯一的用户消息', async () => {
+  const draft = '按刚才那个方案继续'
+  const { calls } = fakeComposer(T.hostRef, { history: HISTORY, draft })
+  await T.runEnhance(fakeBtn(), () => {}, null, { useContext: true })
+  const enhance = calls.filter((c) => c.method === 'llm.oneshot')[1]
+  assert.ok(/【上文/.test(enhance.params.instructions), '⇧ 时带上文块')
+  assert.ok(enhance.params.instructions.includes('chipsPreserved'), '上文取最近一轮')
+  assert.ok(/禁止写进输出|只用于理解/.test(enhance.params.instructions), '上文块带只读约束')
+  assert.equal(enhance.params.input, draft, '草稿仍然是唯一 user 消息，不被上文污染')
+})
+
+await testAsync('T21: 增强结果丢引用标记 → 不写回草稿', async () => {
+  const draft = '@file:src/app.tsx 给这个组件加 loading'
+  const { calls, draft: now } = fakeComposer(T.hostRef, { draft, enhanceOut: '给这个组件加 loading' })
+  await T.runEnhance(fakeBtn(), () => {}, null, undefined)
+  assert.equal(now(), draft, '草稿保持原样（拒绝写回）')
+  const oneShots = calls.filter((c) => c.method === 'llm.oneshot')
+  assert.equal(oneShots.length, 1, '含引用的草稿跳过修复，只发增强请求')
+  assert.ok(/额外硬性约束/.test(oneShots[0].params.instructions), '引用齐备时仍注入保真条款')
 })
 
 // ── 汇总 ──
