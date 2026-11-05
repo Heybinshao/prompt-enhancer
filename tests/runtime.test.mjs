@@ -276,7 +276,7 @@ test('T16: cleanEnhance 剥掉「改写后：」这类标题，但不吃用户�
 test('T17: 名词表——标识符 + 出现两次的产品名，排除令牌/哈希/版本号', () => {
   const msgs = [
     { role: 'user', text: 'Hermes 的 prompt-enhancer 里 chipsPreserved 怎么写的' },
-    { role: 'assistant', text: '现在用的是 Hermes 0.21.6，文件在 /Users/someone/Projects/catalog-prep/prompt-enhancer/desktop/plugin.js' },
+    { role: 'assistant', text: '现在用的是 Hermes 0.21.6，文件在 /Users/someone/Projects/demo/desktop/plugin.js' },
     { role: 'user', text: '好的，令牌 ghp_abcdefghijklmn 和 a1b2c3d4e5f6 还有 v2.2.0 都别外传' }
   ]
   const terms = T.extractGlossary(msgs)
