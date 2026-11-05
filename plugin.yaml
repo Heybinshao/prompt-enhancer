@@ -3,7 +3,7 @@ version: 2.3.0
 requires_hermes: ">=0.21.6"
 description: "A button in the Hermes Desktop composer that first repairs dictation typos in the draft, then rewrites it into a structured prompt; one more click restores the original typing. ⌘-click picks the model both steps use (written to auxiliary.prompt_* in config.yaml). Two gateway calls per click; reads the session's own history (local, read-only) to build a proper-noun list for the repair step, and adds the previous turn only on ⇧-click; keeps @file chips and /command + inline /skill references verbatim; per-session state."
 author: Heybinshao
-license: MIT
+license: CC-BY-NC-4.0
 homepage: https://github.com/Heybinshao/prompt-enhancer
 tags: [desktop, composer, prompt, llm]
 # Two halves: the UI in desktop/plugin.js, and a tiny backend (dashboard/) whose
