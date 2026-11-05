@@ -424,7 +424,7 @@ const LOCALES = {
       draftChanged: 'Draft changed — enhancement not applied',
       chipLost: 'Rewrite dropped a reference tag — kept your draft instead',
       revertStale: 'Draft changed — revert mode exited',
-      resultReady: 'Enhancement ready — click ✨ on this session to apply',
+      resultReady: 'Enhancement ready — it will apply automatically when you return to this session',
       truncated: 'Result may be truncated — click the button to revert',
       emptyDraft: 'Composer is empty — nothing to enhance',
       repairNoChange: 'No typos found — nothing to fix',
@@ -450,7 +450,7 @@ const LOCALES = {
       draftChanged: '草稿已变动，本次增强结果未应用',
       chipLost: '改写结果丢了引用标记，已保留你的草稿',
       revertStale: '草稿已变动，已退出恢复模式',
-      resultReady: '增强结果已就绪，回到该会话点击 ✨ 写入',
+      resultReady: '增强结果已就绪，回到该会话会自动写入',
       truncated: '结果可能被截断，可点击按钮恢复原文',
       emptyDraft: '输入框为空，没有可增强的内容',
       repairNoChange: '未发现需要修复的内容',
@@ -476,7 +476,7 @@ const LOCALES = {
       draftChanged: '草稿已變動，本次增強結果未套用',
       chipLost: '改寫結果丟了引用標籤，已保留你的草稿',
       revertStale: '草稿已變動，已退出恢復模式',
-      resultReady: '增強結果已就緒，回到該會話點擊 ✨ 寫入',
+      resultReady: '增強結果已就緒，回到該會話會自動寫入',
       truncated: '結果可能被截斷，可點擊按鈕恢復原文',
       emptyDraft: '輸入框為空，沒有可增強的內容',
       repairNoChange: '未發現需要修復的內容',
@@ -1252,6 +1252,36 @@ function EnhanceButton() {
           setPhase('idle')
         }
       }).catch(() => { /* detached mid-read — next observer tick retries */ })
+    })
+    mo.observe(editor, { childList: true, characterData: true, subtree: true })
+    return () => mo.disconnect()
+  }, [phase])
+
+  // Auto-apply a parked result: the result only parks when the owning composer
+  // was unmounted (user switched away mid-run). When THIS editor's content
+  // becomes the base the enhancement ran on again — the user is back on the
+  // owning session — write it in with no extra click. Event-driven (content
+  // mutation), never polled; applyPending re-verifies the session guard, and a
+  // mismatch just stays parked (manual click still works as the fallback).
+  useLayoutEffect(() => {
+    if (phase !== 'ready') return
+    const btn = btnRef.current
+    const editor = resolveEditor(btn)
+    if (!editor) return
+    const st = editorState(editor)
+    if (!st.pending) return
+    let applying = false
+    const mo = new MutationObserver(() => {
+      if (applying || st.phase !== 'ready') return
+      const c = sdkComposer()
+      if (!c) return
+      const btnEl = btnRef.current
+      void c.getDraft(resolveSessionId(btnEl, () => host.state.activeSessionId.get())).then((live) => {
+        if (applying || st.phase !== 'ready') return
+        if (live !== st.pendingBase) return // not back on the owning draft — stay parked
+        applying = true
+        void applyPending(btnEl, syncPhase).finally(() => { applying = false })
+      }).catch(() => { /* detached mid-read — next mutation retries */ })
     })
     mo.observe(editor, { childList: true, characterData: true, subtree: true })
     return () => mo.disconnect()
