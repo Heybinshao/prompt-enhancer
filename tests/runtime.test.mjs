@@ -75,7 +75,7 @@ export const __test = {
   stripWrappingQuotes, looksTruncated, outputCapFor, maxTokensFor, profileScope,
   repairDriftOk, chipsPreserved, REPAIR_PREFIX_RE,
   cleanEnhance, enhanceTokensOk, slashCommandOf, slashReferencesOf, extractGlossary, buildContextBlock, ENHANCE_PREFIX_RE,
-  runEnhance,
+  runEnhance, applyPending, resolveSessionId,
   hostRef: host,
   setStorage: (s) => { storageApi = s },
   setRest: (fn) => { restApi = fn },
@@ -422,6 +422,63 @@ await testAsync('T24b: 修复结果保住 /skill → 正常写回并作为增强
   const oneShots = calls.filter((c) => c.method === 'llm.oneshot')
   assert.equal(oneShots[1].params.input, fixed, '引用保住的修复结果正常成为增强输入')
   assert.equal(now(), '/content-drafting 写一篇稿子', '增强结果写回')
+})
+
+// ── 多输入框隔离（v2.3.0）─────────────────────────────────────────────────
+// 地址解析按表面收敛：tile 自答、未绑定 tile 拒答、主区空草稿走 'new'。
+test('T27: resolveSessionId 按表面收敛，不得兜底到别的输入框', () => {
+  const btn = (anchor) => ({ closest: () => (anchor === null ? null : { getAttribute: () => anchor }) })
+  const getActive = () => 'primary-rt'
+  assert.equal(T.resolveSessionId(btn('session-tile:stored-1'), getActive), 'stored-1', 'tile 自答自己的会话')
+  assert.equal(T.resolveSessionId(btn('session-tile:'), getActive), null, '未绑定 tile 拒答，不得落到主区会话')
+  assert.equal(T.resolveSessionId(btn('workspace'), getActive), 'primary-rt', '主区有会话时用主区会话')
+  assert.equal(T.resolveSessionId(btn('workspace'), () => null), 'new', '主区空草稿必须用 new——null 会路由到最后点击的输入框')
+  assert.equal(T.resolveSessionId(btn(null), getActive), 'primary-rt', '无锚兜底保留')
+})
+
+// 切走会话（写回 fail-closed false）→ 结果进 ready 态不丢，切回一键写入。
+await testAsync('T25: 写回失败 → ready 态，切回后 applyPending 写入', async () => {
+  let current = '把今天的会议纪要整理一下'
+  const gw = { request: async (method, params) => { if (method === 'session.history') return { messages: [] }; return { text: params.task === 'prompt_repair' ? params.input : '整理好的纪要' } } }
+  T.hostRef.state.activeSessionId.get = () => 's1'
+  T.hostRef.getGateway = () => gw
+  let writes = 0
+  T.hostRef.composer = {
+    getDraft: async () => current,
+    setDraft: async (_s, t) => { writes++; if (writes === 1) return false; current = t; return true }
+  }
+  const editor = { isContentEditable: true }
+  const btn = { closest: () => ({ querySelector: () => editor, getAttribute: () => null }) }
+  const phases = []
+  await T.runEnhance(btn, (p) => phases.push(p), null, undefined)
+  assert.equal(phases.at(-1), 'ready', '写回失败后进入 ready（结果不丢）')
+  assert.ok(!phases.includes('enhanced'), '不得假报已应用')
+  await T.applyPending(btn, (p) => phases.push(p))
+  assert.equal(current, '整理好的纪要', '切回后一键写入')
+  assert.equal(phases.at(-1), 'enhanced', '写入后进入可恢复态')
+})
+
+// parked 期间草稿被改 → 守卫拒绝，结果整体丢弃，不覆盖用户的编辑。
+await testAsync('T26: ready 期间草稿被改 → 丢弃结果回 idle，不覆盖', async () => {
+  let current = '把今天的会议纪要整理一下'
+  const gw = { request: async (method, params) => { if (method === 'session.history') return { messages: [] }; return { text: params.task === 'prompt_repair' ? params.input : '整理好的纪要' } } }
+  T.hostRef.state.activeSessionId.get = () => 's1'
+  T.hostRef.getGateway = () => gw
+  let writes = 0
+  T.hostRef.composer = {
+    getDraft: async () => current,
+    setDraft: async () => { writes++; return false }
+  }
+  const editor = { isContentEditable: true }
+  const btn = { closest: () => ({ querySelector: () => editor, getAttribute: () => null }) }
+  const phases = []
+  await T.runEnhance(btn, (p) => phases.push(p), null, undefined)
+  assert.equal(phases.at(-1), 'ready')
+  current = '用户自己改过了'
+  await T.applyPending(btn, (p) => phases.push(p))
+  assert.equal(current, '用户自己改过了', '用户的编辑不得被覆盖')
+  assert.equal(writes, 1, '守卫拒绝后不得再写')
+  assert.equal(phases.at(-1), 'idle', '回到空闲态')
 })
 
 // ── 汇总 ──

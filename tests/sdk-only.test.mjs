@@ -32,7 +32,7 @@ test('P4: SDK 不可用时告知用户而非回落', () => {
   if (!/if \(!c\) return tNotify\('error', 'notify\.failed'/.test(src)) throw new Error('runEnhance 缺 SDK 闸门提示')
   // write refused → notify, no DOM
   const w = src.match(/let applied = false[\s\S]{0,400}/g) ?? []
-  const refuses = w.some((m) => /tNotify\('info', 'notify\.(draftChanged|revertStale)'/.test(m.split('\n\n')[0]))
+  const refuses = w.some((m) => /tNotify\('info', 'notify\.(draftChanged|revertStale|resultReady)'/.test(m.split('\n\n')[0]))
   if (!refuses) throw new Error('写回失败路径未提示用户')
   if (/dispatchEvent\(new (Event|InputEvent)/.test(src)) throw new Error('仍有合成 DOM 事件')
   if (/replaceChildren/.test(src)) throw new Error('仍有 DOM 写回')

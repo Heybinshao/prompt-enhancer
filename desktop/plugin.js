@@ -364,8 +364,24 @@ function glossaryBlock(terms) {
 
 function resolveSessionId(btnEl, getActiveSessionId) {
   const anchor = btnEl && btnEl.closest ? btnEl.closest('[data-session-anchor]')?.getAttribute('data-session-anchor') ?? '' : ''
-  const m = anchor.match(/^session-tile:(.+)$/)
-  if (m && m[1]) return m[1]
+  // Per-surface fail-closed addressing (host chat/index.tsx:548 — tiles anchor
+  // as `session-tile:<storedId>`, the PRIMARY surface anchors as 'workspace').
+  // A fallback to the wrong session reads and writes ANOTHER composer's draft,
+  // so each address class resolves on its own terms:
+  if (anchor.startsWith('session-tile:')) {
+    // A tile answers for its own session only. An unbound tile (empty id) must
+    // refuse — falling back to activeSessionId would target the PRIMARY's
+    // session instead.
+    return anchor.slice('session-tile:'.length) || null
+  }
+  if (anchor === 'workspace') {
+    const active = getActiveSessionId()
+    // Fresh draft on the primary (no runtime session yet): 'new' is the host's
+    // addressed literal for the primary's no-session draft. A null here would
+    // route to the ACTIVE composer — whatever the user clicked into last,
+    // possibly a tile holding another session (sdk/composer.ts resolveComposerAddress).
+    return active || 'new'
+  }
   return getActiveSessionId() || null
 }
 // ── pure:TDD-END ──
@@ -380,7 +396,7 @@ const stateByEditor = new WeakMap() // editor → { phase, backup, lastApplied, 
 function editorState(editor) {
   let s = stateByEditor.get(editor)
   if (!s) {
-    s = { phase: 'idle', backup: '', lastApplied: '', seq: 0 }
+    s = { phase: 'idle', backup: '', lastApplied: '', seq: 0, pending: '', pendingBase: '' }
     stateByEditor.set(editor, s)
   }
   return s
@@ -392,7 +408,7 @@ function editorState(editor) {
 // non-React handlers use ctx.i18n.t captured at register time.
 const LOCALES = {
   en: {
-    tip: { idle: 'Enhance prompt', repairing: 'Fixing typos…', enhancing: 'Enhancing…', retrying: 'Rate limited — retrying…', repaired: 'Input fixed — click to revert', revert: 'Revert to original' },
+    tip: { idle: 'Enhance prompt', repairing: 'Fixing typos…', enhancing: 'Enhancing…', retrying: 'Rate limited — retrying…', repaired: 'Input fixed — click to revert', ready: 'Result ready — click to apply', revert: 'Revert to original' },
     menu: {
       statusMainTitle: 'Current: default main model',
       statusPinTitle: 'Current: custom model',
@@ -408,6 +424,7 @@ const LOCALES = {
       draftChanged: 'Draft changed — enhancement not applied',
       chipLost: 'Rewrite dropped a reference tag — kept your draft instead',
       revertStale: 'Draft changed — revert mode exited',
+      resultReady: 'Enhancement ready — click ✨ on this session to apply',
       truncated: 'Result may be truncated — click the button to revert',
       emptyDraft: 'Composer is empty — nothing to enhance',
       repairNoChange: 'No typos found — nothing to fix',
@@ -417,7 +434,7 @@ const LOCALES = {
     }
   },
   zh: {
-    tip: { idle: '增强提示词', repairing: '修复输入中…', enhancing: '增强中…', retrying: '限流重试中…', repaired: '已修复输入 · 恢复原文', revert: '恢复原文' },
+    tip: { idle: '增强提示词', repairing: '修复输入中…', enhancing: '增强中…', retrying: '限流重试中…', repaired: '已修复输入 · 恢复原文', ready: '结果已就绪 · 点击写入', revert: '恢复原文' },
     menu: {
       statusMainTitle: '当前增强：默认主模型',
       statusPinTitle: '当前增强：自定义模型',
@@ -433,6 +450,7 @@ const LOCALES = {
       draftChanged: '草稿已变动，本次增强结果未应用',
       chipLost: '改写结果丢了引用标记，已保留你的草稿',
       revertStale: '草稿已变动，已退出恢复模式',
+      resultReady: '增强结果已就绪，回到该会话点击 ✨ 写入',
       truncated: '结果可能被截断，可点击按钮恢复原文',
       emptyDraft: '输入框为空，没有可增强的内容',
       repairNoChange: '未发现需要修复的内容',
@@ -442,7 +460,7 @@ const LOCALES = {
     }
   },
   'zh-hant': {
-    tip: { idle: '增強提示詞', repairing: '修復輸入中…', enhancing: '增強中…', retrying: '限流重試中…', repaired: '已修復輸入 · 恢復原文', revert: '恢復原文' },
+    tip: { idle: '增強提示詞', repairing: '修復輸入中…', enhancing: '增強中…', retrying: '限流重試中…', repaired: '已修復輸入 · 恢復原文', ready: '結果已就緒 · 點擊寫入', revert: '恢復原文' },
     menu: {
       statusMainTitle: '當前增強：預設主模型',
       statusPinTitle: '當前增強：自訂模型',
@@ -458,6 +476,7 @@ const LOCALES = {
       draftChanged: '草稿已變動，本次增強結果未套用',
       chipLost: '改寫結果丟了引用標籤，已保留你的草稿',
       revertStale: '草稿已變動，已退出恢復模式',
+      resultReady: '增強結果已就緒，回到該會話點擊 ✨ 寫入',
       truncated: '結果可能被截斷，可點擊按鈕恢復原文',
       emptyDraft: '輸入框為空，沒有可增強的內容',
       repairNoChange: '未發現需要修復的內容',
@@ -710,7 +729,7 @@ async function fetchSessionMessages(sessionId) {
 // rejection — because none of them should block the enhancement the user asked
 // for. The caller never distinguishes, so a bad repair degrades to the old
 // behaviour instead of failing the click.
-async function runRepair(c, sessionId, text, st, seq, onRetry, glossary) {
+async function runRepair(c, sessionId, text, st, seq, onRetry, glossary, profile) {
   if (text.length > REPAIR_SKIP_CHARS) {
     console.error('[prompt-enhancer] repair skip: draft too long', text.length)
     return null
@@ -747,7 +766,7 @@ async function runRepair(c, sessionId, text, st, seq, onRetry, glossary) {
       temperature: 0, // proofreading is not a creative task
       task: 'prompt_repair'
     }
-    Object.assign(req, profileScope(host.state.focusedSessionProfile.get()))
+    Object.assign(req, profileScope(profile))
     res = await callGatewayWithRetry(gw, req, onRetry, () => seq !== st.seq)
   } catch (e) {
     console.error('[prompt-enhancer] repair failed (enhancing the original):', e)
@@ -790,8 +809,8 @@ function settlePhase(st) {
 //           'skipped'   — nothing to repair / guardrail rejected the result
 //           'changed'   — the user edited the draft while we were working
 //           'cancelled' — the run was cancelled mid-flight
-async function repairAndApply(c, sessionId, text, st, seq, onRetry, glossary) {
-  const repaired = await runRepair(c, sessionId, text, st, seq, onRetry, glossary)
+async function repairAndApply(c, sessionId, text, st, seq, onRetry, glossary, profile) {
+  const repaired = await runRepair(c, sessionId, text, st, seq, onRetry, glossary, profile)
   if (seq !== st.seq) return { reason: 'cancelled', base: null }
   if (!repaired) return { reason: 'skipped', base: null }
   // Same draft-unchanged guard as the enhance write-back: the user may have
@@ -824,6 +843,13 @@ async function runRepairOnly(btnEl, onPhase, onRetry) {
   if (!editor.isContentEditable) return tNotify('error', 'notify.notEditable')
   const st = editorState(editor)
   if (st.phase === 'enhancing' || st.phase === 'repairing') return
+  // Profile captured ONCE, synchronously at click time — reading it per step
+  // would let a mid-run focus switch put the steps on different profiles.
+  // Known gap: focusedSessionProfile is the FOCUSED session's profile; the
+  // owning session's own profile has no host door yet, so enhancing a
+  // non-focused tile resolves under the focused profile (upstream-gap note,
+  // not a regression this plugin can fix).
+  const profile = host.state.focusedSessionProfile.get()
   const sessionId = resolveSessionId(btnEl, () => host.state.activeSessionId.get())
   const text = (await c.getDraft(sessionId)) ?? ''
   if (!text.trim()) return tNotify('info', 'notify.emptyDraft')
@@ -832,6 +858,8 @@ async function runRepairOnly(btnEl, onPhase, onRetry) {
   const seq = ++st.seq
   st.backup = ''
   st.lastApplied = ''
+  st.pending = ''
+  st.pendingBase = ''
   st.phase = 'repairing'
   onPhase('repairing')
   // Glossary is the repair step's only context: names, not the transcript. Skip
@@ -840,7 +868,7 @@ async function runRepairOnly(btnEl, onPhase, onRetry) {
   const repairWillRun = text.length <= REPAIR_SKIP_CHARS && !CHIP_REF_RE.test(text) && text.trim().length >= 8
   const glossary = repairWillRun ? extractGlossary(await fetchSessionMessages(sessionId)) : []
   if (seq !== st.seq) return // cancelled while the history read was in flight
-  const { reason } = await repairAndApply(c, sessionId, text, st, seq, onRetry, glossary)
+  const { reason } = await repairAndApply(c, sessionId, text, st, seq, onRetry, glossary, profile)
   if (reason === 'cancelled') return
   if (reason === 'applied') return onPhase('repaired')
   st.phase = 'idle'
@@ -859,8 +887,13 @@ async function runEnhance(btnEl, onPhase, onRetry, opts) {
   if (!editor.isContentEditable) return tNotify('error', 'notify.notEditable')
   const st = editorState(editor)
   if (st.phase === 'enhancing' || st.phase === 'repairing') return
+  // Profile captured ONCE, synchronously at click time (same rationale as
+  // runRepairOnly): a mid-run focus switch must not move step 2 onto another
+  // session's profile.
+  const profile = host.state.focusedSessionProfile.get()
   // Both steps go out BARE: the model comes from auxiliary.prompt_repair /
-  // prompt_enhancement (written by the backend half), not from request params.
+  // auxiliary.prompt_enhancement (written by the backend half), not from
+  // request params.
   const sessionId = resolveSessionId(btnEl, () => host.state.activeSessionId.get())
   const draftText = await c.getDraft(sessionId)
   const text = draftText ?? ''
@@ -878,6 +911,8 @@ async function runEnhance(btnEl, onPhase, onRetry, opts) {
   // enhance/revert must not be mistaken for this run's original draft.
   st.backup = ''
   st.lastApplied = ''
+  st.pending = ''
+  st.pendingBase = ''
   // Spin FIRST, read history second: a session history read can take seconds,
   // and a click that shows nothing for 15s reads as a dead button.
   st.phase = 'repairing'
@@ -899,7 +934,7 @@ async function runEnhance(btnEl, onPhase, onRetry, opts) {
   // the composer so the user SEES what changed — the composer is the review
   // surface, there is no diff panel — and so the step still leaves them with a
   // clean draft if the enhancement that follows fails.
-  const repairStep = await repairAndApply(c, sessionId, text, st, seq, onRetry, glossary)
+  const repairStep = await repairAndApply(c, sessionId, text, st, seq, onRetry, glossary, profile)
   if (repairStep.reason === 'cancelled') return // draft untouched
   if (repairStep.reason === 'changed') {
     tNotify('info', 'notify.draftChanged')
@@ -943,7 +978,8 @@ async function runEnhance(btnEl, onPhase, onRetry, opts) {
       task: 'prompt_enhancement'
     }
     // Both steps follow the same auxiliary config; the request stays bare.
-    Object.assign(req, profileScope(host.state.focusedSessionProfile.get()))
+    // `profile` was captured at click time — see the note at the top of runEnhance.
+    Object.assign(req, profileScope(profile))
     // host.request is hard-capped at the gateway default 30s
     // (DEFAULT_GATEWAY_REQUEST_TIMEOUT_MS) — LLM generation routinely exceeds
     // it. getGateway().request takes timeoutMs as its 3rd arg (client wait).
@@ -984,14 +1020,18 @@ async function runEnhance(btnEl, onPhase, onRetry, opts) {
     if (!st.backup) st.backup = snapshot
     st.lastApplied = cleaned
     // SDK-only write: false/throw = no mounted surface claimed the address
-    // (user switched away mid-call). Tell the user; never reach into the DOM.
+    // (user switched away mid-call). Park the finished result as READY instead
+    // of dropping it: the button turns into "result ready", and one click back
+    // on the owning session applies it (applyPending re-verifies the draft
+    // guard). Never reach into the DOM.
     let applied = false
     try { applied = await c.setDraft(sessionId, cleaned) } catch { applied = false }
     if (!applied) {
-      tNotify('info', 'notify.draftChanged')
-      const p = settlePhase(st)
-      st.phase = p
-      onPhase(p)
+      st.pending = cleaned
+      st.pendingBase = base
+      st.phase = 'ready'
+      onPhase('ready')
+      tNotify('info', 'notify.resultReady')
       return
     }
     // The app normalizes on paint (a known `/token` becomes a pill, a ref
@@ -1017,6 +1057,55 @@ async function runEnhance(btnEl, onPhase, onRetry, opts) {
     st.phase = p
     onPhase(p)
   }
+}
+
+// Applies a parked enhancement result (phase 'ready'). The click came from the
+// owning session's composer, so a surface is mounted again. The draft guard
+// re-verifies first: while the result was parked the user may have edited the
+// draft (or the app normalized it), and a stale result must not overwrite it.
+async function applyPending(btnEl, onPhase) {
+  const c = sdkComposer()
+  if (!c) return
+  const editor = resolveEditor(btnEl)
+  if (!editor) return
+  const st = editorState(editor)
+  const pending = st.pending
+  if (!pending) {
+    st.phase = 'idle'
+    onPhase('idle')
+    return
+  }
+  const sessionId = resolveSessionId(btnEl, () => host.state.activeSessionId.get())
+  const live = await c.getDraft(sessionId)
+  if (live !== st.pendingBase) {
+    // Draft moved on while the result was parked — the result no longer
+    // matches what the user is typing. Drop it entirely (revert mode too:
+    // the original was never replaced, so there is nothing to restore).
+    tNotify('info', 'notify.draftChanged')
+    st.phase = 'idle'
+    st.backup = ''
+    st.lastApplied = ''
+    st.pending = ''
+    st.pendingBase = ''
+    onPhase('idle')
+    return
+  }
+  let applied = false
+  try { applied = await c.setDraft(sessionId, pending) } catch { applied = false }
+  if (!applied) {
+    // Still unmounted (should not happen — the click came from this composer).
+    // Stay ready: the result is not lost.
+    tNotify('info', 'notify.resultReady')
+    return
+  }
+  // Same normalization rule as the direct write-back: store the composer's OWN
+  // text so revert's stale check compares like with like.
+  const painted = await c.getDraft(sessionId)
+  if (typeof painted === 'string') st.lastApplied = painted
+  st.pending = ''
+  st.pendingBase = ''
+  st.phase = 'enhanced'
+  onPhase('enhanced')
 }
 
 async function revert(btnEl, onPhase) {
@@ -1188,6 +1277,10 @@ function EnhanceButton() {
       // instead of dropping the user into an idle button over a changed draft.
       syncPhase(st ? settlePhase(st) : 'idle')
     }
+    // A parked result applies with one click back on the owning session. Like
+    // the revert and busy states, the button has exactly one meaning here — a
+    // modifier must not silently change it.
+    else if (current === 'ready') void applyPending(btnRef.current, syncPhase)
     // ⌥/Option-click = repair only, no enhancement. Only honoured from idle:
     // in the revert and busy states the button has exactly one meaning and a
     // modifier must not silently change it.
@@ -1208,9 +1301,10 @@ function EnhanceButton() {
     ? (retrying ? t('tip.retrying') : t('tip.enhancing'))
     : phase === 'repairing'
       ? (retrying ? t('tip.retrying') : t('tip.repairing'))
-      : phase === 'repaired' ? t('tip.repaired')
-        : phase === 'enhanced' ? t('tip.revert')
-          : t('tip.idle')
+      : phase === 'ready' ? t('tip.ready')
+        : phase === 'repaired' ? t('tip.repaired')
+          : phase === 'enhanced' ? t('tip.revert')
+            : t('tip.idle')
 
   // The MENU is not ours: ModelCatalogMenu from the SDK is the same component
   // the composer's model pill renders (search, provider grouping, favorites) —
@@ -1296,9 +1390,11 @@ function EnhanceButton() {
                 ? jsx(Spinner, {})
                 : jsx(Codicon, {
                     // The icon tracks the action available, not the event that just
-                    // happened: once the composer holds our text, the only thing this
+                    // happened: a parked result writes in with one click ('check'),
+                    // and once the composer holds our text the only thing this
                     // button can still do is go back to the original draft → return arrow.
-                    name: phase === 'enhanced' || phase === 'repaired' ? 'discard' : 'sparkle',
+                    name: phase === 'ready' ? 'check'
+                      : phase === 'enhanced' || phase === 'repaired' ? 'discard' : 'sparkle',
                     size: '0.875rem'
                   })
             })
@@ -1402,10 +1498,12 @@ export default {
     pinnedModel = loadPin()
     hostRejectsProfile = false
     // Two windows share one localStorage but not one module: mirror the other
-    // window's writes instead of showing a stale default there.
+    // window's writes instead of showing a stale default there. (Was `defaultPin
+    // = loadPin()` — an implicit global that throws in strict module mode, so
+    // the mirror never fired.)
     ctx.addEventListener?.(window, 'storage', (e) => {
       if (!e || e.key !== `hermes.plugin.${ID}.${PIN_KEY}`) return
-      defaultPin = loadPin()
+      pinnedModel = loadPin()
       emitPin()
     })
     injectSpinnerStyle()
