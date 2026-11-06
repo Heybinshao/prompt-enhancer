@@ -209,7 +209,7 @@ const SLASH_CMD_RE = /^\/[A-Za-z][A-Za-z0-9_-]{0,31}(?=\s|$)/
 // position 0 is a COMMAND the app executes, while `/skill` after whitespace is an
 // inline REFERENCE — "the inline shape is what makes skills reachable anywhere in
 // a prompt". Both are chips after commit, so both must survive a rewrite; the
-// path lookahead keeps `/Users/someone/a.md` and `1/2` out of it.
+// path lookahead keeps `~/someone/a.md` and `1/2` out of it.
 const SLASH_REF_RE = /(?:^|[\s\uFFFC])\/[A-Za-z][\w-]{0,31}(?![\w./-])/g
 
 function slashCommandOf(text) {
@@ -1136,8 +1136,7 @@ async function revert(btnEl, onPhase) {
   onPhase('idle')
 }
 
-// WorkBuddy-parity spinner: 16px circle, stroke-dasharray "28 10", 1s linear
-// infinite rotation (extracted from WorkBuddy app.asar, EnhanceButton spinner).
+// Spinner: 16px circle, stroke-dasharray "28 10", 1s linear infinite rotation.
 // Native DOM — color follows currentColor so the button's --ui-text-tertiary
 // drives it across light/dark themes.
 function Spinner() {
@@ -1300,7 +1299,7 @@ function EnhanceButton() {
     // level of undo.
     if (current === 'enhanced' || current === 'repaired') void revert(btnRef.current, syncPhase)
     else if (current === 'enhancing' || current === 'repairing') {
-      // WorkBuddy parity: the spinning button is a cancel button. Bump THIS
+      // The spinning button is a cancel button. Bump THIS
       // editor's seq so its in-flight request's late result is discarded.
       if (st) st.seq++
       // A repair already written back is a finished result — stay revertable
@@ -1410,7 +1409,7 @@ function EnhanceButton() {
               'aria-expanded': menuOpen,
               [BTN_ATTR]: '',
               className: GHOST_ICON_BTN,
-              disabled: false, // spinner is a cancel button while busy (WorkBuddy parity)
+              disabled: false, // spinner is a cancel button while busy
               onClick,
               ref: btnRef,
               size: 'icon',

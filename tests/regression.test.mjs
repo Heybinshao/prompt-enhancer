@@ -177,7 +177,7 @@ test('R7d: 修复模板含输入边界、句内语序与中英混排规则', () 
   assert.ok(!/改动尺度|阶梯|指代/.test(m[1]), '修复模板不得混入增强侧概念')
 })
 
-// [取消语义] WorkBuddy parity：转圈可点=取消，取消后迟到大结果丢弃
+// [取消语义] 转圈可点=取消，取消后迟到大结果丢弃
 await atest('R8: 等待中取消 → 迟到结果被丢弃', async () => {
   const { editorState } = createStateStore()
   const a = editorState('A')
