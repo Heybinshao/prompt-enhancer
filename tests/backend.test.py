@@ -95,11 +95,30 @@ def test_read_roundtrip():
     assert payload["tasks"]["prompt_enhancement"] == {"provider": "p", "model": "m"}
 
 
+def test_register_declares_aux_tasks():
+    # 新版 Hermes 网关拒绝未注册的 task 名（unknown auxiliary task），
+    # register() 必须把两个槽位都声明出来，缺一个按钮就报 invalid_params。
+    registered = []
+
+    class FakeCtx:
+        def register_auxiliary_task(self, key, **_kw):
+            registered.append(key)
+
+    import importlib.util as _ilu
+    _spec = _ilu.spec_from_file_location("pe_backend", ROOT / "__init__.py")
+    assert _spec is not None and _spec.loader is not None
+    _mod = _ilu.module_from_spec(_spec)
+    _spec.loader.exec_module(_mod)
+    _mod.register(FakeCtx())
+    assert sorted(registered) == ["prompt_enhancement", "prompt_repair"]
+
+
 for name, fn in [
     ("B1: 一次写入两个任务（修复 + 增强）", test_writes_both_tasks),
     ("B2: clear 只清辅助模型，不动主模型", test_clear_removes_keys),
     ("B3: 只有一半的请求被 400 拒绝", test_rejects_half_a_pick),
     ("B4: 读回与写入一致", test_read_roundtrip),
+    ("B5: register 声明两个辅助任务槽位", test_register_declares_aux_tasks),
 ]:
     check(name, fn)
 

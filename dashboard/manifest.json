@@ -3,6 +3,6 @@
   "label": "Prompt Enhancer",
   "description": "Which model the composer's enhance button uses.",
   "icon": "sparkle",
-  "version": "2.0.0",
+  "version": "2.4.0",
   "api": "plugin_api.py"
 }
