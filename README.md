@@ -1,6 +1,6 @@
 # Prompt Enhancer for Hermes
 
-![仓库版本](https://img.shields.io/badge/仓库-v2.5.0-blue) ![官方目录](https://img.shields.io/badge/官方目录-v1.7.1-lightgrey) ![Hermes](https://img.shields.io/badge/Hermes-%E2%89%A5%200.21.6-informational)
+![仓库版本](https://img.shields.io/badge/仓库-v2.5.1-blue) ![官方目录](https://img.shields.io/badge/官方目录-v1.7.1-lightgrey) ![Hermes](https://img.shields.io/badge/Hermes-%E2%89%A5%200.21.6-informational)
 
 【Hermes 插件】把口语草稿变成可执行的结构化提示词。桌面输入框里的 ✨ 按钮，外加 `/enhance` 命令（手机 app / Telegram / 命令行）和 iOS 快捷指令 HTTP 门——四个入口，同一套模板，同一个模型设置。en / 简中 / 繁體。
 
@@ -13,13 +13,13 @@
 | 来源 | 版本 | 有哪几步 | 升级方式 |
 |---|---|---|---|
 | 官方插件目录<br>`hermes plugins install prompt-enhancer` | **1.7.1** | 桌面按钮（⌥ 只修复） | `hermes plugins update prompt-enhancer` |
-| 本仓库 main（Git 安装） | **2.5.0** | 按钮 + 快捷键 + `/enhance` + HTTP 门 | 重装 + 勾「强制重装」 |
+| 本仓库 main（Git 安装） | **2.5.1** | 按钮 + 快捷键 + `/enhance` + HTTP 门 | 重装 + 勾「强制重装」 |
 
-一句话记住差别：**目录条目钉在某个已评审的 commit 上，所以永远慢一截**——下面正文按 2.5.0 写。
+一句话记住差别：**目录条目钉在某个已评审的 commit 上，所以永远慢一截**——下面正文按 2.5.1 写。
 
 > ⚠️ **目录版 1.7.1 在当前版本的 Hermes 上点按钮会直接失败**（新版 Hermes 拒绝插件没有正式注册的任务名，表现为「增强失败：invalid_params」）。还在用目录版的先从 Git 装 2.4.0 以上；目录条目等 [#149288](https://github.com/NousResearch/hermes-agent/pull/149288) 合并才会跟上。
 
-2.5.0 相比目录版多的东西：
+2.5.1 相比目录版多的东西：
 
 - **修 invalid_params**：两个任务槽位（提示词修复 / 提示词增强）由插件正式注册——这是旧版在新 Hermes 上点按钮直接失败的根因
 - **自定义快捷键**：设置 ▸ 键盘快捷键 里出现三行可绑定动作（详见[快捷键](#快捷键)）

@@ -1592,25 +1592,35 @@ export default {
       pinnedModel = loadPin()
       emitPin()
     })
-    // Custom shortcuts: the HOST owns everything user-facing. Three actions
-    // ship unbound and show up in Settings ▸ Keyboard Shortcuts as rebindable
-    // rows (captured chord + persistence are the host's store, not ours):
-    // plain enhance / repair-only / enhance-with-context. Register-time labels
-    // are static snapshots — a language switch refreshes them on the next
-    // plugin reload. Older hosts have no `keybinds` area: swallow and log, the
-    // button keeps working, there are just no shortcut rows.
-    try {
-      const kbLabels = (key) => (typeof ti18nStatic === 'function' && ti18nStatic(key)) || key
-      enhanceKeybindContributions({
-        enhance: kbLabels('keybinds.enhance'),
-        repairOnly: kbLabels('keybinds.repairOnly'),
-        enhanceContext: kbLabels('keybinds.enhanceContext')
-      }).forEach((action, i) => {
-        ctx.register({ id: `enhance-shortcut-${i}`, area: 'keybinds', data: action })
-      })
-    } catch (err) {
-      console.error(`[prompt-enhancer] host has no keybinds area — no shortcut rows: ${err?.message ?? err}`)
+    // Register-time labels are a COLD-START snapshot: the app's language
+    // (display.language) arrives via async config IPC, which always lands AFTER
+    // synchronous plugin registration — so the first snapshot is always
+    // English. I18nProvider writes document.documentElement.lang on every
+    // locale change: watch it and re-register (same ids → atomic replacement)
+    // when the language lands or the user switches it.
+    const registerKeybindActions = () => {
+      try {
+        const kbLabels = (key) => (typeof ti18nStatic === 'function' && ti18nStatic(key)) || key
+        enhanceKeybindContributions({
+          enhance: kbLabels('keybinds.enhance'),
+          repairOnly: kbLabels('keybinds.repairOnly'),
+          enhanceContext: kbLabels('keybinds.enhanceContext')
+        }).forEach((action, i) => {
+          ctx.register({ id: `enhance-shortcut-${i}`, area: 'keybinds', data: action })
+        })
+      } catch (err) {
+        console.error(`[prompt-enhancer] host has no keybinds area — no shortcut rows: ${err?.message ?? err}`)
+      }
     }
+    registerKeybindActions()
+    let lastKeybindLang = document.documentElement.lang
+    const keybindLangObserver = new MutationObserver(() => {
+      const lang = document.documentElement.lang
+      if (!lang || lang === lastKeybindLang) return // idempotent: unchanged lang = no-op
+      lastKeybindLang = lang
+      registerKeybindActions()
+    })
+    keybindLangObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['lang'] })
     injectSpinnerStyle()
 
     ctx.register({
@@ -1623,6 +1633,7 @@ export default {
       disposeI18n?.()
       removeSpinnerStyle()
       pinListeners.clear()
+      keybindLangObserver.disconnect()
       storageApi = null
       restApi = null
       ti18nStatic = null
