@@ -104,13 +104,67 @@ def test_register_declares_aux_tasks():
         def register_auxiliary_task(self, key, **_kw):
             registered.append(key)
 
+        def register_command(self, *a, **kw):  # merged /enhance — captured, not run
+            registered.append(f"cmd:{a[0] if a else kw.get('name')}")
+
     import importlib.util as _ilu
     _spec = _ilu.spec_from_file_location("pe_backend", ROOT / "__init__.py")
     assert _spec is not None and _spec.loader is not None
     _mod = _ilu.module_from_spec(_spec)
     _spec.loader.exec_module(_mod)
     _mod.register(FakeCtx())
-    assert sorted(registered) == ["prompt_enhancement", "prompt_repair"]
+    assert sorted(registered) == ["cmd:enhance", "prompt_enhancement", "prompt_repair"]
+
+
+def _backend_module():
+    import importlib.util as _ilu
+    _spec = _ilu.spec_from_file_location("pe_backend2", ROOT / "__init__.py")
+    assert _spec is not None and _spec.loader is not None
+    _mod = _ilu.module_from_spec(_spec)
+    _spec.loader.exec_module(_mod)
+    return _mod
+
+
+def test_templates_mirror_desktop():
+    # 模板曾经分散两个仓、靠手动拷贝（漂了没人知道）。合并后逐字节守护：
+    # desktop/plugin.js 是源头，__init__.py 必须一字不差。
+    import re as _re
+
+    backend = _backend_module()
+    js = (ROOT / "desktop" / "plugin.js").read_text(encoding="utf-8")
+    for py_const, js_const in (("SYSTEM_TEMPLATE", "SYSTEM_TEMPLATE"), ("REPAIR_TEMPLATE", "REPAIR_TEMPLATE")):
+        m = _re.search(rf"const {js_const} = `([^`]*)`", js)
+        assert m, f"desktop/plugin.js 里找不到 {js_const}"
+        assert getattr(backend, py_const) == m.group(1), f"{py_const} 与桌面版模板漂移了"
+
+
+def test_enhance_command_handler():
+    backend = _backend_module()
+    calls = []
+
+    def fake_oneshot(instructions, user_input, task, max_tokens):
+        calls.append(task)
+        return f"处理后的文本（{len(user_input)} 字输入）"
+
+    setattr(backend, "_oneshot", fake_oneshot)
+    # 空参 → 帮助
+    assert backend._handle("") == backend.HELP
+    # both 模式：修复 + 改写，两次调用
+    out = backend._handle("帮我写一封邮件给老师请假")
+    assert calls == ["prompt_repair", "prompt_enhancement"]
+    assert "处理后的文本" in out
+    # fix 模式：只修复，一次调用
+    calls.clear()
+    out = backend._handle("fix 拼音错字测试")
+    assert calls == ["prompt_repair"]
+    # copy 模式：结果包代码围栏
+    calls.clear()
+    out = backend._handle("copy 内容")
+    assert out.startswith("```\n") and out.endswith("\n```")
+    # 超长草稿：拒绝且不调用模型
+    calls.clear()
+    out = backend._handle("x" * (backend.MAX_INPUT_CHARS + 1))
+    assert "上限" in out and calls == []
 
 
 for name, fn in [
@@ -118,7 +172,9 @@ for name, fn in [
     ("B2: clear 只清辅助模型，不动主模型", test_clear_removes_keys),
     ("B3: 只有一半的请求被 400 拒绝", test_rejects_half_a_pick),
     ("B4: 读回与写入一致", test_read_roundtrip),
-    ("B5: register 声明两个辅助任务槽位", test_register_declares_aux_tasks),
+    ("B5: register 声明两个辅助任务槽位 + /enhance 命令", test_register_declares_aux_tasks),
+    ("B6: 提示词模板与桌面版逐字节一致", test_templates_mirror_desktop),
+    ("B7: /enhance 命令处理器（模式/上限/帮助）", test_enhance_command_handler),
 ]:
     check(name, fn)
 
