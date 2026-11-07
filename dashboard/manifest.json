@@ -1,8 +1,8 @@
 {
   "name": "prompt-enhancer",
   "label": "Prompt Enhancer",
-  "description": "Which model the composer's enhance button uses.",
+  "description": "Model choice for the enhance button, plus the POST /enhance HTTP door (iOS Shortcuts) behind the same plugin.",
   "icon": "sparkle",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "api": "plugin_api.py"
 }

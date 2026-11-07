@@ -414,6 +414,11 @@ const LOCALES = {
       statusPinTitle: 'Current: custom model',
       reset: 'Reset to default'
     },
+    keybinds: {
+      enhance: 'Enhance prompt: repair, then rewrite',
+      repairOnly: 'Enhance prompt: repair input only',
+      enhanceContext: 'Enhance prompt: with previous turn'
+    },
     notify: {
       noEditor: 'Composer not found',
       notEditable: 'Composer is not editable right now',
@@ -439,6 +444,11 @@ const LOCALES = {
       statusMainTitle: '当前增强：默认主模型',
       statusPinTitle: '当前增强：自定义模型',
       reset: '恢复默认'
+    },
+    keybinds: {
+      enhance: '增强提示词：先修复再增强',
+      repairOnly: '增强提示词：仅修复输入',
+      enhanceContext: '增强提示词：附上一轮上下文'
     },
     notify: {
       noEditor: '未找到输入框',
@@ -466,6 +476,11 @@ const LOCALES = {
       statusPinTitle: '當前增強：自訂模型',
       reset: '恢復預設'
     },
+    keybinds: {
+      enhance: '增強提示詞：先修復再增強',
+      repairOnly: '增強提示詞：僅修復輸入',
+      enhanceContext: '增強提示詞：附上一輪上下文'
+    },
     notify: {
       noEditor: '未找到輸入框',
       notEditable: '輸入框目前不可編輯',
@@ -492,6 +507,48 @@ let ti18nStatic = null // captured at register; null before → raw-key fallback
 function tNotify(kind, key, ...args) {
   const msg = ti18nStatic ? ti18nStatic(key, ...args) : null
   host.notify({ kind, message: msg ?? `[prompt-enhancer] ${key}` })
+}
+
+// ── Custom shortcut via the host keybinds panel ───────────────────────────
+// The action ships UNBOUND (`defaults: []`): it shows up in Settings ▸
+// Keyboard Shortcuts as a rebindable row like the built-ins, the host captures
+// the chord and stores rebinds — nothing here persists or listens. Trigger =
+// a click on the FOCUSED composer's ✨ button, so cancel / revert / apply
+// semantics are the button's, not a second state machine.
+function focusedComposerButton() {
+  // Walk up from the focused element to the innermost container holding our
+  // button. No such container = not composing right now → no-op, never a
+  // wrong target.
+  let n = document.activeElement
+  if (n && n.hasAttribute?.(BTN_ATTR)) return n
+  while (n && n !== document.body) {
+    const btn = n.querySelector?.(`[${BTN_ATTR}]`)
+    if (btn) return btn
+    n = n.parentElement
+  }
+  return null
+}
+
+function triggerFocusedEnhance(mods) {
+  if (typeof document === 'undefined') return
+  const btn = focusedComposerButton()
+  if (!btn) return
+  // A synthetic click with the variant's modifier goes through the button's
+  // ONE onClick: phase branches (revert / cancel / apply) come first — the
+  // same single meaning a real ⌥/⇧-click has — and only idle reaches the
+  // variant branch. No second state machine, no divergent semantics.
+  btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ...(mods ?? {}) }))
+}
+
+function enhanceKeybindContributions(labels) {
+  return [
+    { id: `${ID}.enhance`, label: labels.enhance, mods: null },
+    { id: `${ID}.repairOnly`, label: labels.repairOnly, mods: { altKey: true } },
+    { id: `${ID}.enhanceContext`, label: labels.enhanceContext, mods: { shiftKey: true } }
+  ].map(({ id, label, mods }) => ({
+    id, category: 'composer', defaults: [], label,
+    run: () => triggerFocusedEnhance(mods)
+  }))
 }
 
 // ── Enhance model pin (⌘+click picker) ────────────────────────────────────
@@ -1514,7 +1571,7 @@ function EnhanceButton() {
 export default {
   id: ID,
   name: 'Prompt Enhancer',
-  description: 'A composer ✨ button that fixes dictation typos in the draft, then rewrites it into a structured prompt (task / scope / constraints / output shape); one click back restores the original typing. ⌘-click pins the model both steps use. Two stateless gateway calls (repair → enhance), preserves @file and /command chips, per-session state.',
+  description: 'A composer ✨ button that fixes dictation typos in the draft, then rewrites it into a structured prompt (task / scope / constraints / output shape); one click back restores the original typing. ⌘-click pins the model both steps use. Two stateless gateway calls (repair → enhance), preserves @file and /command chips, per-session state. Also ships /enhance (mobile app / Telegram / TUI) and a POST /enhance HTTP door for iOS Shortcuts.',
   register(ctx) {
     const disposeI18n = ctx.i18n.register(LOCALES)
     ti18nStatic = ctx.i18n.t
@@ -1535,6 +1592,25 @@ export default {
       pinnedModel = loadPin()
       emitPin()
     })
+    // Custom shortcuts: the HOST owns everything user-facing. Three actions
+    // ship unbound and show up in Settings ▸ Keyboard Shortcuts as rebindable
+    // rows (captured chord + persistence are the host's store, not ours):
+    // plain enhance / repair-only / enhance-with-context. Register-time labels
+    // are static snapshots — a language switch refreshes them on the next
+    // plugin reload. Older hosts have no `keybinds` area: swallow and log, the
+    // button keeps working, there are just no shortcut rows.
+    try {
+      const kbLabels = (key) => (typeof ti18nStatic === 'function' && ti18nStatic(key)) || key
+      enhanceKeybindContributions({
+        enhance: kbLabels('keybinds.enhance'),
+        repairOnly: kbLabels('keybinds.repairOnly'),
+        enhanceContext: kbLabels('keybinds.enhanceContext')
+      }).forEach((action, i) => {
+        ctx.register({ id: `enhance-shortcut-${i}`, area: 'keybinds', data: action })
+      })
+    } catch (err) {
+      console.error(`[prompt-enhancer] host has no keybinds area — no shortcut rows: ${err?.message ?? err}`)
+    }
     injectSpinnerStyle()
 
     ctx.register({

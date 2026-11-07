@@ -1,14 +1,14 @@
 name: prompt-enhancer
-version: 2.4.0
+version: 2.5.0
 requires_hermes: ">=0.21.6"
-description: "A button in the Hermes Desktop composer that first repairs dictation typos in the draft, then rewrites it into a structured prompt; one more click restores the original typing. ⌘-click picks the model both steps use (written to auxiliary.prompt_* in config.yaml). Two gateway calls per click; reads the session's own history (local, read-only) to build a proper-noun list for the repair step, and adds the previous turn only on ⇧-click; keeps @file chips and /command + inline /skill references verbatim; per-session state."
+description: "A button in the Hermes Desktop composer that first repairs dictation typos in the draft, then rewrites it into a structured prompt; one more click restores the original typing. ⌘-click picks the model both steps use (written to auxiliary.prompt_* in config.yaml). Two gateway calls per click; reads the session's own history (local, read-only) to build a proper-noun list for the repair step, and adds the previous turn only on ⇧-click; keeps @file chips and /command + inline /skill references verbatim; per-session state. Ships a /enhance slash command (mobile app / Telegram / TUI) and a POST /enhance HTTP door (iOS Shortcuts) running the same two templates host-side."
 author: Heybinshao
 license: CC-BY-NC-4.0
 homepage: https://github.com/Heybinshao/prompt-enhancer
 tags: [desktop, composer, prompt, llm]
-# Two halves: the UI in desktop/plugin.js, and a tiny backend (dashboard/) whose
-# only job is writing the model choice into config.yaml. Nothing is registered on
-# the agent side (no tools, hooks, middleware or env vars).
+# Two halves: the UI in desktop/plugin.js, and a host-side half (dashboard/ +
+# __init__.py) that writes the model choice into config.yaml, registers the two
+# auxiliary task slots + the /enhance slash command, and serves the HTTP door.
 provides_tools: []
 provides_hooks: []
 capabilities: []

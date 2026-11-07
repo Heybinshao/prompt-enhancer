@@ -76,6 +76,7 @@ export const __test = {
   repairDriftOk, chipsPreserved, REPAIR_PREFIX_RE,
   cleanEnhance, enhanceTokensOk, slashCommandOf, slashReferencesOf, extractGlossary, buildContextBlock, ENHANCE_PREFIX_RE,
   runEnhance, applyPending, resolveSessionId,
+  enhanceKeybindContributions, triggerFocusedEnhance,
   hostRef: host,
   setStorage: (s) => { storageApi = s },
   setRest: (fn) => { restApi = fn },
@@ -479,6 +480,27 @@ await testAsync('T26: ready 期间草稿被改 → 丢弃结果回 idle，不覆
   assert.equal(current, '用户自己改过了', '用户的编辑不得被覆盖')
   assert.equal(writes, 1, '守卫拒绝后不得再写')
   assert.equal(phases.at(-1), 'idle', '回到空闲态')
+})
+
+// ── 自定义快捷键（v2.5.0，走宿主 keybinds 面板） ─────────────────────────────
+
+test('S1: keybinds 贡献载荷——三个动作全部空默认（用户自绑）、composer 类、id 归插件名下', () => {
+  const ks = T.enhanceKeybindContributions({
+    enhance: '增强提示词', repairOnly: '仅修复输入', enhanceContext: '增强并附上一轮上下文'
+  })
+  assert.deepEqual(ks.map(k => k.id),
+    ['prompt-enhancer.enhance', 'prompt-enhancer.repairOnly', 'prompt-enhancer.enhanceContext'])
+  for (const k of ks) {
+    assert.equal(k.category, 'composer')
+    assert.deepEqual(k.defaults, [], '默认不绑定任何组合键')
+    assert.ok(typeof k.label === 'string' && k.label.length > 0, 'label 必须是非空字符串')
+    assert.equal(typeof k.run, 'function')
+  }
+})
+
+test('S2: 触发在无 DOM 环境安全 no-op（旧宿主/测试进程不炸）', () => {
+  T.triggerFocusedEnhance() // node 里没有 document——不抛即过
+  T.triggerFocusedEnhance({ altKey: true }) // 变体同样安全
 })
 
 // ── 汇总 ──
