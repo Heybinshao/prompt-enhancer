@@ -194,6 +194,31 @@ def test_enhance_command_handler():
     assert "8001" in out and "8000" in out and calls == []
 
 
+def test_core_prefers_registered_instance():
+    # HTTP 门必须拿到 register() 里接好 ctx.llm 的那份实例——新鲜加载的模块
+    # _LLM 是 None，POST /enhance 会 502（2.5.2 实际翻过的车）。
+    import sys
+
+    import importlib.util as _ilu
+    api_spec = _ilu.spec_from_file_location("pe_plugin_api_core", ROOT / "dashboard" / "plugin_api.py")
+    assert api_spec is not None and api_spec.loader is not None
+    api_mod = _ilu.module_from_spec(api_spec)
+    api_spec.loader.exec_module(api_mod)
+
+    # 无已注册实例 → 回落新鲜加载（测试进程语义，_LLM 为 None 属预期）
+    fresh = api_mod._core()
+    assert getattr(fresh, "_LLM", "missing") is None
+
+    # 注册过的实例在 sys.modules 里 → _core() 优先返回它
+    registered = _backend_module()
+    setattr(registered, "_LLM", object())
+    sys.modules["hermes_plugins.prompt_enhancer"] = registered
+    try:
+        assert api_mod._core() is registered
+    finally:
+        del sys.modules["hermes_plugins.prompt_enhancer"]
+
+
 for name, fn in [
     ("B1: 一次写入两个任务（修复 + 增强）", test_writes_both_tasks),
     ("B2: clear 只清辅助模型，不动主模型", test_clear_removes_keys),
@@ -202,6 +227,7 @@ for name, fn in [
     ("B5: register 声明两个辅助任务槽位 + /enhance 命令", test_register_declares_aux_tasks),
     ("B6: 提示词模板与桌面版逐字节一致", test_templates_mirror_desktop),
     ("B7: /enhance 命令处理器（模式/上限/帮助）", test_enhance_command_handler),
+    ("B8: HTTP 门优先取已注册实例（防 502）", test_core_prefers_registered_instance),
 ]:
     check(name, fn)
 

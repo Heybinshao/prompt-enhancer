@@ -97,7 +97,6 @@ def set_model(payload: dict = Body(default_factory=dict)) -> dict:
 
 # ── POST /enhance HTTP door (merged from prompt-enhance-cmd) ────────────────
 
-import functools  # noqa: E402
 import importlib.util  # noqa: E402
 from pathlib import Path  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
@@ -105,9 +104,21 @@ from pydantic import BaseModel  # noqa: E402
 _MODES = {"both", "fix", "raw"}
 
 
-@functools.lru_cache(maxsize=1)
 def _core():
-    """The plugin's own module, loaded once: its templates, guards and two calls."""
+    """The plugin's own module, loaded once: its templates, guards and two calls.
+
+    Prefers the REGISTERED instance from this process (``hermes_plugins.*.prompt_enhancer``;
+    its ``_LLM`` door is wired by ``register()``) — a fresh load here would run without
+    ``register()`` and lose the LLM door. Fresh load is the fallback (tests, standalone).
+    Deliberately NOT cached: caching would freeze the pre-registration fallback and
+    outlive plugin reloads; the registered-instance scan is a cheap sys.modules walk.
+    """
+    import sys
+
+    for name, module in list(sys.modules.items()):
+        if (name.startswith("hermes_plugins.") and name.rpartition(".")[2] == "prompt_enhancer"
+                and getattr(module, "_LLM", None) is not None):
+            return module
     path = Path(__file__).resolve().parent.parent / "__init__.py"
     spec = importlib.util.spec_from_file_location("prompt_enhancer_core", path)
     if spec is None or spec.loader is None:  # pragma: no cover - a broken install
