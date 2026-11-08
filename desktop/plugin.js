@@ -396,7 +396,7 @@ const stateByEditor = new WeakMap() // editor → { phase, backup, lastApplied, 
 function editorState(editor) {
   let s = stateByEditor.get(editor)
   if (!s) {
-    s = { phase: 'idle', backup: '', lastApplied: '', seq: 0, pending: '', pendingBase: '' }
+    s = { phase: 'idle', backup: '', lastApplied: '', seq: 0, pending: '', pendingBase: '', expected: '' }
     stateByEditor.set(editor, s)
   }
   return s
@@ -427,6 +427,7 @@ const LOCALES = {
       tooLong: (n, max) => `Draft too long (${n} > ${max} chars) — enhance not supported`,
       noSession: 'Cannot resolve the owning session — enhance not supported',
       draftChanged: 'Draft changed — enhancement not applied',
+      cancelledByEdit: 'Draft changed — enhancement stopped',
       chipLost: 'Rewrite dropped a reference tag — kept your draft instead',
       revertStale: 'Draft changed — revert mode exited',
       resultReady: 'Enhancement ready — it will apply automatically when you return to this session',
@@ -458,6 +459,7 @@ const LOCALES = {
       tooLong: (n, max) => `草稿过长（${n} > ${max} 字符），暂不支持增强`,
       noSession: '无法确定所属会话，暂不支持增强',
       draftChanged: '草稿已变动，本次增强结果未应用',
+      cancelledByEdit: '草稿已变动——已停止本次增强',
       chipLost: '改写结果丢了引用标记，已保留你的草稿',
       revertStale: '草稿已变动，已退出恢复模式',
       resultReady: '增强结果已就绪，回到该会话会自动写入',
@@ -489,6 +491,7 @@ const LOCALES = {
       tooLong: (n, max) => `草稿過長（${n} > ${max} 字元），暫不支援增強`,
       noSession: '無法確定所屬會話，暫不支援增強',
       draftChanged: '草稿已變動，本次增強結果未套用',
+      cancelledByEdit: '草稿已變動——已停止本次增強',
       chipLost: '改寫結果丟了引用標籤，已保留你的草稿',
       revertStale: '草稿已變動，已退出恢復模式',
       resultReady: '增強結果已就緒，回到該會話會自動寫入',
@@ -886,6 +889,7 @@ async function repairAndApply(c, sessionId, text, st, seq, onRetry, glossary, pr
   // user typed, not on the half-fixed draft.
   st.backup = text
   st.lastApplied = base
+  st.expected = base // our own write-back re-baselines the edit watch
   st.phase = 'repaired'
   return { reason: 'applied', base }
 }
@@ -917,6 +921,7 @@ async function runRepairOnly(btnEl, onPhase, onRetry) {
   st.lastApplied = ''
   st.pending = ''
   st.pendingBase = ''
+  st.expected = text // busy-phase edit watch: baseline = what we launched on
   st.phase = 'repairing'
   onPhase('repairing')
   // Glossary is the repair step's only context: names, not the transcript. Skip
@@ -970,6 +975,7 @@ async function runEnhance(btnEl, onPhase, onRetry, opts) {
   st.lastApplied = ''
   st.pending = ''
   st.pendingBase = ''
+  st.expected = text // busy-phase edit watch: baseline = what we launched on
   // Spin FIRST, read history second: a session history read can take seconds,
   // and a click that shows nothing for 15s reads as a dead button.
   st.phase = 'repairing'
@@ -1341,6 +1347,51 @@ function EnhanceButton() {
     })
     mo.observe(editor, { childList: true, characterData: true, subtree: true })
     return () => mo.disconnect()
+  }, [phase])
+
+  // User edits cancel the run early: a draft that changed mid-flight makes the
+  // in-flight result obsolete — stop waiting instead of implying it is still
+  // coming. The seq bump makes the late result drop silently at arrival (the
+  // request itself cannot be aborted client-side). Our OWN writes re-baseline
+  // st.expected, so the repair write-back never self-cancels; the debounce
+  // merges keystroke bursts into one check and lets IME composition settle.
+  useLayoutEffect(() => {
+    if (phase !== 'enhancing' && phase !== 'repairing') return
+    const btn = btnRef.current
+    const editor = resolveEditor(btn)
+    if (!editor) return
+    const st = editorState(editor)
+    let timer = null
+    let reading = false
+    const mo = new MutationObserver(() => {
+      if (timer || reading) return
+      timer = setTimeout(() => {
+        timer = null
+        if (st.phase !== 'enhancing' && st.phase !== 'repairing') return
+        if (reading) return
+        const c = sdkComposer()
+        if (!c) return
+        reading = true
+        void c.getDraft(resolveSessionId(btnRef.current, () => host.state.activeSessionId.get())).then((live) => {
+          reading = false
+          if (st.phase !== 'enhancing' && st.phase !== 'repairing') return
+          if (live === null || live === st.expected) return // unchanged → keep waiting
+          // The user edited the draft mid-run: stop THIS run. Re-triggering is
+          // the user's call — never auto-rerun (a write-back while they are
+          // typing would clobber their input).
+          st.seq++
+          st.phase = 'idle'
+          st.backup = ''
+          st.lastApplied = ''
+          st.pending = ''
+          st.pendingBase = ''
+          setPhase('idle')
+          tNotify('info', 'notify.cancelledByEdit')
+        }).catch(() => { reading = false /* detached mid-read — next mutation retries */ })
+      }, 400)
+    })
+    mo.observe(editor, { childList: true, characterData: true, subtree: true })
+    return () => { mo.disconnect(); if (timer) clearTimeout(timer) }
   }, [phase])
 
   const onClick = (e) => {

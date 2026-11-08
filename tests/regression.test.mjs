@@ -391,6 +391,18 @@ test('R17: ⌥ 点击只修复——有独立入口、不触发增强调用', ()
   assert.ok(/repairAndApply\(/.test(body), '仅修复路径必须复用同一套修复写回（含快照守卫）')
 })
 
+// [v2.6.0] 等待期用户编辑 = 立即停止本次增强（seq 取消 + 通知），不自动重跑
+test('R20: 编辑即取消——观察器只挂 busy 态，自家写回重置基线', () => {
+  const fs = await_import_fs()
+  const src = fs.readFileSync(new URL('../desktop/plugin.js', import.meta.url), 'utf8')
+  assert.ok(/notify\.cancelledByEdit/.test(src), '缺「编辑即取消」的通知')
+  assert.ok(/phase !== 'enhancing' && phase !== 'repairing'\) return/.test(src),
+    'busy 观察器缺相位闸（enhanced/repaired 的 auto-reset 是另一条守卫，不得合并）')
+  assert.ok(/st\.expected = base \/\/ our own write-back re-baselines the edit watch/.test(src),
+    '自家写回必须重置基线，否则修复写回会触发自取消')
+  assert.ok(/st\.seq\+\+\n\s+st\.phase = 'idle'/.test(src), '编辑取消必须走 seq 取消（到货即弃）')
+})
+
 // ── v1.8.0 模型 pin 语义镜像（与 plugin.js 的 normalizePin / effectivePin /
 // consumeOnce 保持同步；plugin.js 改动这三处必须同步本文件并全量重跑） ──
 function normalizePinMirror(v) {
