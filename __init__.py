@@ -13,23 +13,66 @@ half carries everything that must run host-side:
   cannot write ``config.yaml``) and the ``POST /enhance`` HTTP door for iOS
   Shortcuts.
 
+Strings here follow the host language through the core i18n layer: English is
+the base (``agent.i18n.t`` falls back to it), Simplified Chinese ships as a
+locale pack — the catalog UI is English-first.
+
 The prompt templates are kept byte-for-byte in step with ``desktop/plugin.js``
 (that file is the source of truth; ``tests/backend.test.py`` guards the sync).
+Model calls go through the public ``ctx.llm.complete`` with our own registered
+``task`` slots — never the private oneshot helper.
 """
 
 from __future__ import annotations
 
+from agent.i18n import t
+
+# i18n packs: English base + Simplified Chinese layer (catalog UI is
+# English-first; zh resolves through display.language at call time).
+_ENHANCE_I18N = {
+    "en": {
+        "enhance.help": "/enhance — turn a draft into a structured, executable prompt (runs host-side; works in the mobile app, Telegram and the CLI)\n\nUsage:\n  /enhance <draft>        repair typos first, then rewrite (2 calls, ~10-20s)\n  /enhance fix <draft>    repair only — no rewrite (1 call, fastest)\n  /enhance raw <draft>    rewrite only — skip the repair pass\n  /enhance copy <draft>   same as both, wrapped in a code fence for one-tap copy\n\nThe reply is the rewritten text itself. The model follows the same setting as the desktop enhance button (Settings ▸ auxiliary tasks: prompt_repair / prompt_enhancement).",
+        "enhance.err.too_long": "Draft is {count} chars — over the {max}-char limit. Split it into parts or shorten it.",
+        "enhance.err.empty": "The model returned an empty answer — try again?",
+        "enhance.fail": "Enhance failed: {detail}",
+        "aux.prompt_repair.name": "Prompt repair",
+        "aux.prompt_repair.description": "prompt-enhancer step 1: fix common typos and dictation slips",
+        "aux.prompt_enhancement.name": "Prompt enhancement",
+        "aux.prompt_enhancement.description": "prompt-enhancer step 2: rewrite the draft into a structured prompt",
+    },
+    "zh": {
+        "enhance.help": "/enhance — 把草稿改写成可执行的结构化提示词（在主机侧跑，手机 app、Telegram、命令行都能用）\n\n用法：\n  /enhance <草稿>        先修语音/打字错字，再改写（两次调用，约 10–20 秒）\n  /enhance fix <草稿>    只修错字，不改写（一次调用，最快）\n  /enhance raw <草稿>    只改写，跳过修错字\n  /enhance copy <草稿>   同上，结果包成代码块（客户端若给代码块配了复制按钮，可一键复制）\n\n只输出改写后的文本，直接长按复制即可。模型跟桌面那个增强按钮共用\n（设置里的 auxiliary.prompt_repair / prompt_enhancement）。",
+        "enhance.err.too_long": "草稿 {count} 字符，超过 {max} 的上限——分两段发，或缩短后再来。",
+        "enhance.err.empty": "模型返回了空内容，再试一次？",
+        "enhance.fail": "增强失败：{detail}",
+        "aux.prompt_repair.name": "提示词修复",
+        "aux.prompt_repair.description": "prompt-enhancer 第一步：修正常见笔误与口语句",
+        "aux.prompt_enhancement.name": "提示词增强",
+        "aux.prompt_enhancement.description": "prompt-enhancer 第二步：把提示词改写成模型更易执行的版本",
+    },
+}
+
+# ctx.llm, captured at register — the public route for our own aux task slots.
+_LLM = None
+
 
 def register(ctx) -> None:
+    global _LLM
+    _LLM = ctx.llm
+    for lang, pack in _ENHANCE_I18N.items():
+        try:
+            ctx.register_locale(lang, pack)
+        except Exception as exc:  # noqa: BLE001 — i18n failure must not break the plugin load
+            print(f"[prompt-enhancer] locale pack '{lang}' not registered: {type(exc).__name__}: {exc}")
     ctx.register_auxiliary_task(
         "prompt_repair",
-        display_name="提示词修复",
-        description="prompt-enhancer 第一步：修正常见笔误与口语句",
+        display_name=t("aux.prompt_repair.name"),
+        description=t("aux.prompt_repair.description"),
     )
     ctx.register_auxiliary_task(
         "prompt_enhancement",
-        display_name="提示词增强",
-        description="prompt-enhancer 第二步：把提示词改写成模型更易执行的版本",
+        display_name=t("aux.prompt_enhancement.name"),
+        description=t("aux.prompt_enhancement.description"),
     )
     ctx.register_command(
         "enhance",
@@ -108,16 +151,7 @@ TOKEN_CLAUSE = (
     "禁止改写、翻译、删除，也不要给它们加引号或反引号。"
 )
 
-HELP = """/enhance — 把草稿改写成可执行的结构化提示词（在主机侧跑，手机 app、Telegram、命令行都能用）
-
-用法：
-  /enhance <草稿>        先修语音/打字错字，再改写（两次调用，约 10–20 秒）
-  /enhance fix <草稿>    只修错字，不改写（一次调用，最快）
-  /enhance raw <草稿>    只改写，跳过修错字
-  /enhance copy <草稿>   同上，结果包成代码块（客户端若给代码块配了复制按钮，可一键复制）
-
-只输出改写后的文本，直接长按复制即可。模型跟桌面那个增强按钮共用
-（设置里的 auxiliary.prompt_repair / prompt_enhancement）。"""
+HELP_KEY = "enhance.help"  # resolved through t() at call time — follows the host language
 
 # ── cleanup (mirror of desktop/plugin.js) ───────────────────────────────────
 
@@ -179,24 +213,29 @@ def _max_tokens_for(cap: int) -> int:
     return min(4096, max(2048, round(cap * 2)))
 
 
-def _oneshot(instructions: str, user_input: str, task: str, max_tokens: int) -> str:
-    from agent.oneshot import run_oneshot
-
-    return run_oneshot(
-        instructions=instructions,
-        user_input=user_input,
+def _oneshot(instructions: str, user_input: str, task: str, max_tokens: int, temperature: float = 0.3) -> str:
+    """Public route only: ``ctx.llm.complete`` with our own registered task slot."""
+    if _LLM is None:
+        raise RuntimeError("prompt-enhancer is not registered yet — no LLM door")
+    result = _LLM.complete(
+        messages=[
+            {"role": "system", "content": instructions},
+            {"role": "user", "content": user_input},
+        ],
         task=task,
         max_tokens=max_tokens,
-        temperature=0.3,
+        temperature=temperature,
         timeout=60.0,
     )
+    return result.text
 
 
 def _repair(text: str) -> str:
     """One stateless proofreading pass. Returns *text* unchanged when the model's
     answer drifts past the budget or drops a machine token."""
     out = _clean_repair(
-        _oneshot(REPAIR_TEMPLATE, text, task="prompt_repair", max_tokens=_max_tokens_for(min(len(text), 2000)))
+        _oneshot(REPAIR_TEMPLATE, text, task="prompt_repair",
+                 max_tokens=_max_tokens_for(min(len(text), 2000)), temperature=0.0)
     )
     if not out.strip():
         return text
@@ -217,14 +256,14 @@ def _enhance(text: str) -> str:
     out = _strip_fence(_oneshot("\n\n".join(blocks), text, task="prompt_enhancement", max_tokens=_max_tokens_for(cap)))
     out = _strip_wrapping_quotes(out)
     if not out.strip():
-        raise RuntimeError("模型返回了空内容，再试一次？")
+        raise RuntimeError(t("enhance.err.empty"))
     return out
 
 
 def _handle(raw_args: str, session_id: str = "", **_: object) -> Optional[str]:
     args = (raw_args or "").strip()
     if not args or args.lower().split()[0] in {"help", "-h", "--help"}:
-        return HELP
+        return t(HELP_KEY)
 
     mode = "both"
     first, _, rest = args.partition(" ")
@@ -232,9 +271,9 @@ def _handle(raw_args: str, session_id: str = "", **_: object) -> Optional[str]:
         mode, args = first.lower(), rest.strip()
 
     if not args:
-        return HELP
+        return t(HELP_KEY)
     if len(args) > MAX_INPUT_CHARS:
-        return f"草稿 {len(args)} 字符，超过 {MAX_INPUT_CHARS} 的上限——分两段发，或缩短后再来。"
+        return t("enhance.err.too_long", count=len(args), max=MAX_INPUT_CHARS)
 
     try:
         text = args
@@ -249,4 +288,4 @@ def _handle(raw_args: str, session_id: str = "", **_: object) -> Optional[str]:
         # (the plain answer has none, and a phone cannot select inside a bubble).
         return f"```\n{text}\n```" if mode == "copy" else text
     except Exception as exc:  # noqa: BLE001 — surfaced to the chat as the command's answer
-        return f"增强失败：{type(exc).__name__}: {exc}"
+        return t("enhance.fail", detail=f"{type(exc).__name__}: {exc}")

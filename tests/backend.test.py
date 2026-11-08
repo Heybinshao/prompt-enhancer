@@ -99,8 +99,14 @@ def test_register_declares_aux_tasks():
     # 新版 Hermes 网关拒绝未注册的 task 名（unknown auxiliary task），
     # register() 必须把两个槽位都声明出来，缺一个按钮就报 invalid_params。
     registered = []
+    locales = []
 
     class FakeCtx:
+        llm = object()  # captured into _LLM at register
+
+        def register_locale(self, lang, pack):
+            locales.append((lang, sorted(pack)))
+
         def register_auxiliary_task(self, key, **_kw):
             registered.append(key)
 
@@ -114,6 +120,10 @@ def test_register_declares_aux_tasks():
     _spec.loader.exec_module(_mod)
     _mod.register(FakeCtx())
     assert sorted(registered) == ["cmd:enhance", "prompt_enhancement", "prompt_repair"]
+    # i18n: English base + zh layer, both packs registered
+    assert sorted(lang for lang, _keys in locales) == ["en", "zh"]
+    for _lang, keys in locales:
+        assert "enhance.help" in keys and "aux.prompt_repair.name" in keys
 
 
 def _backend_module():
@@ -140,15 +150,32 @@ def test_templates_mirror_desktop():
 
 def test_enhance_command_handler():
     backend = _backend_module()
+
+    class _Ctx:
+        llm = object()
+
+        def register_locale(self, lang, pack):
+            # 走真层——agent.i18n.t 的 core surface 读的就是这里注册的包
+            from agent.i18n_layers import register_pack
+
+            register_pack(lang, "core", pack, source="test:prompt-enhancer")
+
+        def register_auxiliary_task(self, *a, **kw):
+            pass
+
+        def register_command(self, *a, **kw):
+            pass
+
+    backend.register(_Ctx())  # 注册 i18n 包——t() 才能解析，否则回落裸 key
     calls = []
 
-    def fake_oneshot(instructions, user_input, task, max_tokens):
+    def fake_oneshot(instructions, user_input, task, max_tokens, temperature=0.3):
         calls.append(task)
         return f"处理后的文本（{len(user_input)} 字输入）"
 
     setattr(backend, "_oneshot", fake_oneshot)
-    # 空参 → 帮助
-    assert backend._handle("") == backend.HELP
+    # 空参 → 帮助（跟宿主语言走）
+    assert backend._handle("") == backend.t("enhance.help")
     # both 模式：修复 + 改写，两次调用
     out = backend._handle("帮我写一封邮件给老师请假")
     assert calls == ["prompt_repair", "prompt_enhancement"]
@@ -164,7 +191,7 @@ def test_enhance_command_handler():
     # 超长草稿：拒绝且不调用模型
     calls.clear()
     out = backend._handle("x" * (backend.MAX_INPUT_CHARS + 1))
-    assert "上限" in out and calls == []
+    assert "8001" in out and "8000" in out and calls == []
 
 
 for name, fn in [
