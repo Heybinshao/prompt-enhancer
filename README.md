@@ -1,32 +1,26 @@
 # Prompt Enhancer for Hermes
 
-![仓库版本](https://img.shields.io/badge/仓库-v2.6.0-blue) ![官方目录](https://img.shields.io/badge/官方目录-v1.7.1-lightgrey) ![Hermes](https://img.shields.io/badge/Hermes-%E2%89%A5%200.21.6-informational)
+![仓库版本](https://img.shields.io/badge/仓库-v2.6.0-blue) ![官方目录](https://img.shields.io/badge/官方目录-v2.6.0-blue) ![Hermes](https://img.shields.io/badge/Hermes-%E2%89%A5%200.21.6-informational)
 
 【Hermes 插件】把口语草稿变成可执行的结构化提示词。桌面输入框里的 ✨ 按钮，外加 `/enhance` 命令（手机 app / Telegram / 命令行）和 iOS 快捷指令 HTTP 门——四个入口，同一套模板，同一个模型设置。en / 简中 / 繁體。
 
 ![prompt-enhancer](assets/cover.jpg)
 
-## 先确认你装的是哪一版
+## 版本
 
-官方目录和本仓库发的**不是同一份代码**，功能不一样，先对号：
+官方插件目录与本仓库**现在是同一份代码**：目录条目已随 v2.6.0 上架（2026-11-10 合入，[#149288](https://github.com/NousResearch/hermes-agent/pull/149288)），两种安装方式装到的都是 2.6.0。唯一会有差别的窗口期是新版本发布到目录条目更新之间——发新版时本节同步。
 
-| 来源 | 版本 | 有哪几步 | 升级方式 |
-|---|---|---|---|
-| 官方插件目录<br>`hermes plugins install prompt-enhancer` | **1.7.1** | 桌面按钮（⌥ 只修复） | `hermes plugins update prompt-enhancer` |
-| 本仓库 main（Git 安装） | **2.6.0** | 按钮 + 快捷键 + `/enhance` + HTTP 门 | 重装 + 勾「强制重装」 |
+**还在用老目录版 1.7.1 的**：直接 `hermes plugins update prompt-enhancer` 升到 2.6.0——顺带修复老版在新版 Hermes 上点按钮报「invalid_params」的问题，不用卸载重装。
 
-一句话记住差别：**目录条目钉在某个已评审的 commit 上，所以永远慢一截**——下面正文按 2.6.0 写。
+2.4.0 以来加的东西：
 
-> ⚠️ **目录版 1.7.1 在当前版本的 Hermes 上点按钮会直接失败**（新版 Hermes 拒绝插件没有正式注册的任务名，表现为「增强失败：invalid_params」）。还在用目录版的先从 Git 装 2.4.0 以上；目录条目等 [#149288](https://github.com/NousResearch/hermes-agent/pull/149288) 合并才会跟上。
-
-2.6.0 相比目录版多的东西：
-
-- **修 invalid_params**：两个任务槽位（提示词修复 / 提示词增强）由插件正式注册——这是旧版在新 Hermes 上点按钮直接失败的根因
+- **修 invalid_params**：两个任务槽位（提示词修复 / 提示词增强）由插件正式注册——这是旧版在新 Hermes 上点按钮直接失败的根因；这两个槽位也出现在 设置 → 辅助模型 里，可单独钉模型
 - **自定义快捷键**：设置 ▸ 键盘快捷键 里出现三行可绑定动作（详见[快捷键](#快捷键)）
-- **`/enhance` 命令 + HTTP 门**：手机 app、Telegram、命令行、iOS 快捷指令都能用（详见[/enhance 命令](#enhance-命令)）
-- 目录用户另外没有这些 2.2–2.4 的修正：⌘ 选模型、取消后不再补发 429 重试、输出上限按输入自适应、多输入框隔离加固
+- **`/enhance` 命令 + HTTP 门**：手机 app、Telegram、命令行、iOS 快捷指令都能用（详见[/enhance 命令](#enhance-命令)）；原独立插件 prompt-enhance-cmd 已并入
+- **编辑即停**：增强等待期改草稿，立即停止本次，不自动重跑（详见[使用](#使用桌面)表格）
+- 更早的 2.2–2.4 修正：⌘ 选模型、取消后不再补发 429 重试、输出上限按输入自适应、多输入框隔离加固
 
-> 目录实际版本以插件卡片显示为准；本页写于 2026-11-07。
+> 目录实际版本以插件卡片显示为准；本页写于 2026-11-12。
 
 ## 它做什么
 
@@ -43,7 +37,7 @@
 | 方式 | 怎么做 | 装到哪版 | 装完还要做什么 |
 |---|---|---|---|
 | **从 Git 安装**（推荐） | 对 Hermes 说：`从 Git 安装这个桌面插件：https://github.com/Heybinshao/prompt-enhancer，安装好后并打开插件`<br>或点「技能与工具 → 插件」页面上方的「从 Git 安装」 | 仓库当前提交 | ⌘Q 重开 → 到 **技能与工具 → 插件 → Prompt Enhancer** 打开它 |
-| **官方目录** | `hermes plugins install prompt-enhancer` | 1.7.1（新版 Hermes 上不可用，见上方警告） | 同上 |
+| **官方目录** | `hermes plugins install prompt-enhancer` | 2.6.0（与仓库同版） | 同上；升级 = `hermes plugins update prompt-enhancer` |
 
 **装完按钮没出现**：几乎都是没打开。包管理安装（目录 / Git）的桌面副本默认是关的——不加载、也不报错，只是静默不出现，去 **技能与工具 → 插件 → Prompt Enhancer** 点亮。
 
